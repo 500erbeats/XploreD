@@ -1,0 +1,40 @@
+name: xplored
+description: "XploreD - erkunde die reale Welt, Feld für Feld"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Karte
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
+  # Standort
+  geolocator: ^13.0.1
+  permission_handler: ^11.3.1
+
+  # Background Execution (Android Foreground Service)
+  flutter_foreground_task: ^8.13.1
+
+  # Lokale Speicherung
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+  # Geohashing für Grid-Zellen
+  dart_geohash: ^2.0.0
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,30 @@
+<!--
+  Diese Einträge müssen in die bestehende ios/Runner/Info.plist eingefügt
+  werden (innerhalb des äußeren <dict>). Eine komplette Info.plist wird bei
+  `flutter create` generiert - hier nur die für diese App relevanten
+  Ergänzungen, damit nichts Bestehendes überschrieben wird.
+-->
+
+<!-- Anzeigename der App auf dem Homescreen -->
+<key>CFBundleDisplayName</key>
+<string>XploreD</string>
+
+<!-- Begründungstexte, die iOS dem Nutzer im System-Dialog anzeigt.
+     Pflicht - ohne diese Keys crasht die App beim Berechtigungs-Request. -->
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Wir decken die Karte rund um deinen Standort auf, während du die App nutzt.</string>
+
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Mit "Immer" erlaubst du, dass die App auch im Hintergrund neue Gebiete aufdeckt, während du unterwegs bist - z.B. während einer Autofahrt bei ausgeschaltetem Bildschirm.</string>
+
+<!-- Veraltet, aber von manchen iOS-Versionen noch gelesen - zur Sicherheit mit angeben. -->
+<key>NSLocationAlwaysUsageDescription</key>
+<string>Mit "Immer" erlaubst du, dass die App auch im Hintergrund neue Gebiete aufdeckt.</string>
+
+<!-- Aktiviert den Background-Mode "location". Ohne diesen Key liefert iOS
+     KEINE Standort-Updates, sobald die App in den Hintergrund geht, egal
+     welche Permission gewährt wurde. -->
+<key>UIBackgroundModes</key>
+<array>
+  <string>location</string>
+</array>

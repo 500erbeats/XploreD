@@ -1,0 +1,36 @@
+<!--
+  Diese Einträge müssen in die bestehende android/app/src/main/AndroidManifest.xml
+  eingefügt werden. Permissions kommen VOR dem <application>-Tag.
+-->
+
+<!-- Vordergrund-Standort: für aktives Tracking bei geöffneter App -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+<!-- Hintergrund-Standort: eigener Dialog seit Android 10, muss NACH der
+     Vordergrund-Permission separat angefragt werden (siehe LocationService) -->
+<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+<!-- Notwendig für den Foreground Service, der das Tracking im Hintergrund
+     am Leben hält (sonst killt Android den Prozess nach wenigen Minuten) -->
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+<!-- Optional aber empfohlen: verhindert, dass aggressive Hersteller-Battery-
+     Optimierungen (Xiaomi/Huawei/OnePlus) den Service vorzeitig beenden. -->
+<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+<!--
+  Im <application>-Tag: android:label="XploreD" setzen (statt des von
+  `flutter create` generierten Default-Labels).
+
+  Der flutter_foreground_task-Plugin registriert seinen Service automatisch
+  über den Android-Gradle-Buildprozess. Falls nicht, zusätzlich ergänzen:
+-->
+<!--
+<service
+    android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+    android:foregroundServiceType="location"
+    android:exported="false" />
+-->
