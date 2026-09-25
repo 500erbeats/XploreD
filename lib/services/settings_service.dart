@@ -4,11 +4,9 @@ import 'storage_service.dart';
 /// Parsing, damit der Rest der App nie mit rohen String-Keys hantiert.
 class SettingsService {
   static const _keyBackgroundTracking = 'background_tracking_enabled';
-  static const _keyRevealRadius = 'reveal_radius_m';
   static const _keyDistanceFilter = 'distance_filter_m';
   static const _keyOnboardingCompleted = 'onboarding_completed';
 
-  static const defaultRevealRadius = 200.0;
   static const defaultDistanceFilter = 50.0;
 
   Future<bool> isBackgroundTrackingEnabled() async {
@@ -18,15 +16,6 @@ class SettingsService {
 
   Future<void> setBackgroundTrackingEnabled(bool enabled) {
     return StorageService.instance.setSetting(_keyBackgroundTracking, '$enabled');
-  }
-
-  Future<double> getRevealRadiusMeters() async {
-    final value = await StorageService.instance.getSetting(_keyRevealRadius);
-    return value != null ? double.parse(value) : defaultRevealRadius;
-  }
-
-  Future<void> setRevealRadiusMeters(double meters) {
-    return StorageService.instance.setSetting(_keyRevealRadius, '$meters');
   }
 
   Future<double> getDistanceFilterMeters() async {

@@ -13,6 +13,8 @@ dependencies:
   # Karte
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+  flutter_map_cache: ^2.0.0+1
+  http_cache_file_store: ^2.0.0
 
   # Standort
   geolocator: ^13.0.1
@@ -35,6 +37,19 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/markgraeflerland_boundaries.geojson
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  adaptive_icon_background: "#0A0E1A"
+  adaptive_icon_foreground: "assets/icon/icon.png"

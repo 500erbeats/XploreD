@@ -4,10 +4,6 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../services/settings_service.dart';
 
-/// [onTrackingToggle] wird vom Elternteil (HomeScreen) übergeben, weil dort
-/// die tatsächliche Start/Stop-Logik für Foreground Service bzw.
-/// geolocator-Stream liegt - dieser Screen kennt nur die Einstellung, nicht
-/// die Umsetzung.
 class SettingsScreen extends StatefulWidget {
   final Future<void> Function(bool enabled) onTrackingToggle;
 
@@ -21,7 +17,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _settings = SettingsService();
 
   bool _trackingEnabled = true;
-  double _revealRadius = SettingsService.defaultRevealRadius;
   double _distanceFilter = SettingsService.defaultDistanceFilter;
   bool? _batteryOptimizationIgnored;
   bool _loading = true;
@@ -34,7 +29,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final tracking = await _settings.isBackgroundTrackingEnabled();
-    final radius = await _settings.getRevealRadiusMeters();
     final filter = await _settings.getDistanceFilterMeters();
 
     bool? batteryStatus;
@@ -45,7 +39,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _trackingEnabled = tracking;
-      _revealRadius = radius;
       _distanceFilter = filter;
       _batteryOptimizationIgnored = batteryStatus;
       _loading = false;
@@ -56,11 +49,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _trackingEnabled = value);
     await _settings.setBackgroundTrackingEnabled(value);
     await widget.onTrackingToggle(value);
-  }
-
-  Future<void> _onRadiusChanged(double value) async {
-    setState(() => _revealRadius = value);
-    await _settings.setRevealRadiusMeters(value);
   }
 
   Future<void> _onDistanceFilterChanged(double value) async {
@@ -93,16 +81,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             value: _trackingEnabled,
             onChanged: _onTrackingChanged,
-          ),
-          const SizedBox(height: 16),
-          _sliderTile(
-            title: 'Aufdeckungsradius',
-            subtitle: '${_revealRadius.round()} m um deinen Standort',
-            value: _revealRadius,
-            min: 100,
-            max: 400,
-            divisions: 6,
-            onChanged: _onRadiusChanged,
           ),
           const SizedBox(height: 8),
           _sliderTile(
@@ -154,8 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(text,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
       );
 
   Widget _sliderTile({

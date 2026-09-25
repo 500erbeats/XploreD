@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-
 import '../models/explored_cell.dart';
 import '../services/background_task_handler.dart';
 import '../services/exploration_service.dart';
@@ -18,6 +17,12 @@ import 'onboarding_screen.dart';
 import 'privacy_screen.dart';
 import 'settings_screen.dart';
 import 'stats_screen.dart';
+import '../models/place.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
+import 'package:http_cache_file_store/http_cache_file_store.dart';
+import 'package:flutter_map_cache/flutter_map_cache.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -35,11 +40,13 @@ class _HomeScreenState extends State<HomeScreen> {
   LatLng? _currentPosition;
   bool _tracking = false;
   bool _loading = true;
-  double _revealRadius = SettingsService.defaultRevealRadius;
+final double _urbanRadius = 100;
+final double _ruralRadius = 300;
 
   AchievementToastQueue? _toastQueue;
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
+  CachedTileProvider? _tileProvider;
 
   @override
   void initState() {
@@ -56,9 +63,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _bootstrap() async {
+  await _initTileProvider(); // NEU - vor allem anderen
+  try {
     await _exploration.init();
 
     _exploration.onAchievementUnlocked.listen((definition) {
+      _toastQueue?.show(definition);
+    });
+    _exploration.onPlaceAchievementUnlocked.listen((definition) {
       _toastQueue?.show(definition);
     });
 
@@ -66,7 +78,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (last != null) {
       _currentPosition = LatLng(last.$1, last.$2);
     }
-    _revealRadius = await _settings.getRevealRadiusMeters();
 
     final onboardingDone = await _settings.isOnboardingCompleted();
     if (!onboardingDone) {
@@ -88,7 +99,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => _loading = false);
   }
-
+  catch (e, stack) {
+    debugPrint('FEHLER in _bootstrap: $e');
+    debugPrint('$stack');
+    if (mounted) setState(() => _loading = false); // Spinner in jedem Fall beenden
+  }
+}
+  
   /// Wird vom OnboardingScreen aufgerufen, sobald der Nutzer ihn durchlaufen
   /// hat - startet danach den normalen Tracking-Pfad.
   Future<void> _onOnboardingFinished() async {
@@ -129,24 +146,41 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _tracking = true);
   }
 
+Future<void> _initTileProvider() async {
+  final cacheDir = await getTemporaryDirectory();
+  final cachePath = '${cacheDir.path}/map_tiles';
+  await Directory(cachePath).create(recursive: true);
+
+  _tileProvider = CachedTileProvider(
+    maxStale: const Duration(days: 30),
+    store: FileCacheStore(cachePath),
+  );
+}
+
   Future<void> _startAndroidForegroundTracking(double distanceFilter) async {
-    final notificationPermission =
-        await FlutterForegroundTask.checkNotificationPermission();
-    if (notificationPermission != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
-    }
-    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-    }
+  final notificationPermission =
+      await FlutterForegroundTask.checkNotificationPermission();
+  if (notificationPermission != NotificationPermission.granted) {
+    await FlutterForegroundTask.requestNotificationPermission();
+  }
+  if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+    await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+  }
 
-    FlutterForegroundTask.addTaskDataCallback(_onBackgroundData);
+  FlutterForegroundTask.addTaskDataCallback(_onBackgroundData);
 
-    await FlutterForegroundTask.startService(
+  try {
+    final result = await FlutterForegroundTask.startService(
       notificationTitle: 'XploreD',
       notificationText: 'Erkundung läuft im Hintergrund',
       callback: startCallback,
     );
+    debugPrint('Foreground service start result: $result');
+  } catch (e, stack) {
+    debugPrint('FEHLER beim Starten des Foreground Service: $e');
+    debugPrint('$stack');
   }
+}
 
   /// Wird vom Settings-Screen aufgerufen, wenn der Nutzer den Tracking-
   /// Schalter umlegt.
@@ -297,7 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildMapScaffold(BuildContext context) {
     final startCenter = _currentPosition ?? const LatLng(52.5200, 13.4050);
-
+    String? lastTileError;
     return Scaffold(
       body: Stack(
         children: [
@@ -305,28 +339,42 @@ class _HomeScreenState extends State<HomeScreen> {
             mapController: _mapController,
             options: MapOptions(
               initialCenter: startCenter,
-              initialZoom: 16,
-              minZoom: 3,
+              initialZoom: 13,
+              minZoom: 10,
               maxZoom: 19,
+              cameraConstraint: CameraConstraint.contain(bounds: markgraeflerlandBounds),
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
               onMapEvent: (event) => _scheduleViewportLoad(),
               onMapReady: _loadViewportCells,
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=cb1_3x3a_1_7df294938ddb840feac965e2',
                 userAgentPackageName: 'com.example.xplored',
+                tileProvider: _tileProvider,
               ),
-              // Fog-of-War-Ebene: reagiert auf Kamera-Änderungen (Pan/Zoom).
+              RichAttributionWidget(
+                attributions: [
+                  TextSourceAttribution(
+                    '© OpenStreetMap contributors © CARTO',
+                    onTap: () {},
+                  ),
+                ],
+              ),
+             // Fog-of-War-Ebene: reagiert auf Kamera-Änderungen (Pan/Zoom).
               MobileLayerTransformer(
-                child: AnimatedBuilder(
-                  animation: _mapController.mapEventStream as Listenable,
+                child: StreamBuilder<MapEvent>(
+                  stream: _mapController.mapEventStream,
                   builder: (context, _) => CustomPaint(
                     size: Size.infinite,
                     painter: FogOverlayPainter(
-                      exploredCells: _cells,
-                      camera: _mapController.camera,
-                      revealRadiusMeters: _revealRadius,
-                    ),
+                    exploredCells: _cells,
+                    camera: _mapController.camera,
+                    urbanRadiusMeters: _urbanRadius,
+                    ruralRadiusMeters: _ruralRadius,
+                  ),
                   ),
                 ),
               ),
@@ -346,6 +394,25 @@ class _HomeScreenState extends State<HomeScreen> {
             areaKm2: _exploration.estimatedExploredAreaKm2,
             tracking: _tracking,
           ),
+          if (lastTileError != null)
+            Positioned(
+              top: 100,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Tile-Fehler: $lastTileError',
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
           Positioned(
             top: 56,
             right: 16,
@@ -379,8 +446,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             SettingsScreen(onTrackingToggle: _handleTrackingToggle),
                       ),
                     );
-                    final newRadius = await _settings.getRevealRadiusMeters();
-                    if (mounted) setState(() => _revealRadius = newRadius);
                   },
                 ),
               ],

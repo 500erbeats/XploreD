@@ -18,24 +18,44 @@ class StorageService {
     return _db!;
   }
 
-  Future<Database> _initDb() async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'fog_of_war.db');
+Future<Database> _initDb() async {
+  final dbPath = await getDatabasesPath();
+  final path = join(dbPath, 'fog_of_war.db');
 
-    return openDatabase(
-      path,
-      version: 3,
-      onCreate: (db, version) async {
-        await _createV1Tables(db);
-        await _createV2Tables(db);
-        await _createV3Indexes(db);
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) await _createV2Tables(db);
-        if (oldVersion < 3) await _createV3Indexes(db);
-      },
-    );
+  return openDatabase(
+    path,
+    version: 4,
+    onCreate: (db, version) async {
+      await _createV1Tables(db);
+      await _createV2Tables(db);
+      await _createV3Indexes(db);
+      await _createV4PlaceColumn(db);
+    },
+    onUpgrade: (db, oldVersion, newVersion) async {
+      if (oldVersion < 2) await _createV2Tables(db);
+      if (oldVersion < 3) await _createV3Indexes(db);
+      if (oldVersion < 4) await _createV4PlaceColumn(db);
+    },
+  );
+}
+
+/// Neue Spalte für die gecachte Orts-Zugehörigkeit jeder Zelle, plus Index
+/// für schnelle "wie viele Zellen in Ort X"-Abfragen (Achievement-Check).
+Future<void> _createV4PlaceColumn(Database db) async {
+  // ALTER TABLE ADD COLUMN schlägt fehl, falls die Spalte schon existiert -
+  // bei Migrationen von oldVersion < 4 ist das nicht der Fall, bei
+  // onCreate (Neuinstallation) landen wir aber über _createV1Tables schon
+  // ohne die Spalte, daher hier ergänzen.
+  final columns = await db.rawQuery('PRAGMA table_info(explored_cells)');
+  final hasPlaceId = columns.any((c) => c['name'] == 'place_id');
+  if (!hasPlaceId) {
+    await db.execute('ALTER TABLE explored_cells ADD COLUMN place_id TEXT');
   }
+  await db.execute('''
+    CREATE INDEX IF NOT EXISTS idx_explored_cells_place
+    ON explored_cells (place_id)
+  ''');
+}
 
   Future<void> _createV1Tables(Database db) async {
     await db.execute('''
@@ -112,6 +132,18 @@ class StorageService {
     );
     return rows.map(ExploredCell.fromMap).toList();
   }
+
+  /// Zählt erkundete Zellen für einen Ort direkt über die gecachte place_id-
+/// Spalte - dank Index praktisch O(log n), kein Bounding-Box-Query und kein
+/// erneuter Punkt-in-Polygon-Test mehr nötig.
+Future<int> getExploredCellCountForPlace(String placeId) async {
+  final db = await database;
+  final result = await db.rawQuery(
+    'SELECT COUNT(*) as c FROM explored_cells WHERE place_id = ?',
+    [placeId],
+  );
+  return Sqflite.firstIntValue(result) ?? 0;
+}
 
   Future<int> getExploredCellCount() async {
     final db = await database;

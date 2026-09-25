@@ -7,6 +7,8 @@ import '../models/explored_cell.dart';
 import 'achievement_service.dart';
 import 'location_service.dart';
 import 'storage_service.dart';
+import 'place_achievement_service.dart';
+import 'boundary_service.dart';
 
 class ExplorationService {
   static const int _geohashPrecision = 7;
@@ -17,12 +19,16 @@ class ExplorationService {
   final achievements = AchievementService();
   Stream<AchievementDefinition> get onAchievementUnlocked => achievements.onUnlocked;
 
+  final placeAchievements = PlaceAchievementService();
+  Stream<AchievementDefinition> get onPlaceAchievementUnlocked => placeAchievements.onUnlocked;
+
   int _totalExploredCount = 0;
   int get totalExploredCount => _totalExploredCount;
 
   Future<void> init() async {
-    _totalExploredCount = await StorageService.instance.getExploredCellCount();
-  }
+  _totalExploredCount = await StorageService.instance.getExploredCellCount();
+  await BoundaryService.instance.load(); // NEU
+}
 
   void startListening() {
     LocationService.instance.startTracking(onPosition: _handlePosition);
@@ -49,28 +55,37 @@ class ExplorationService {
 
     final stats = await getStats();
     await achievements.checkAll(stats);
+    await placeAchievements.checkPlaceAt(lat, lng);
   }
 
-  Future<void> _revealCells(double lat, double lng) async {
-    final geoHasher = GeoHasher();
-    final centerHash = geoHasher.encode(lng, lat, precision: _geohashPrecision);
-    final neighbors = geoHasher.neighbors(centerHash);
+Future<void> _revealCells(double lat, double lng) async {
+  final geoHasher = GeoHasher();
+  final centerHash = geoHasher.encode(lng, lat, precision: _geohashPrecision);
+  final neighbors = geoHasher.neighbors(centerHash);
 
-    for (final hash in [centerHash, ...neighbors.values]) {
-      final decoded = geoHasher.decode(hash);
-      final cell = ExploredCell(
-        geohash: hash,
-        centerLat: decoded[1],
-        centerLng: decoded[0],
-        firstVisited: DateTime.now(),
-      );
-      final isNew = await StorageService.instance.addExploredCell(cell);
-      if (isNew) {
-        _totalExploredCount++;
-        _newCellController.add(cell);
-      }
+  for (final hash in [centerHash, ...neighbors.values]) {
+    final decoded = geoHasher.decode(hash);
+    final cellLat = decoded[1];
+    final cellLng = decoded[0];
+
+    // EINMALIGE Berechnung hier - wird danach in der DB gecached und nie
+    // wieder neu berechnet (siehe ExploredCell.placeId).
+    final placeId = BoundaryService.instance.placeContaining(cellLat, cellLng)?.id;
+
+    final cell = ExploredCell(
+      geohash: hash,
+      centerLat: cellLat,
+      centerLng: cellLng,
+      firstVisited: DateTime.now(),
+      placeId: placeId,
+    );
+    final isNew = await StorageService.instance.addExploredCell(cell);
+    if (isNew) {
+      _totalExploredCount++;
+      _newCellController.add(cell);
     }
   }
+}
 
   Future<void> _trackDistance(double lat, double lng) async {
     final last = await StorageService.instance.getLastPosition();
@@ -138,5 +153,6 @@ class ExplorationService {
   void dispose() {
     _newCellController.close();
     achievements.dispose();
+    placeAchievements.dispose();
   }
 }
