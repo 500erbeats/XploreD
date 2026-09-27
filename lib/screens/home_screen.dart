@@ -40,8 +40,9 @@ class _HomeScreenState extends State<HomeScreen> {
   LatLng? _currentPosition;
   bool _tracking = false;
   bool _loading = true;
-final double _urbanRadius = 100;
-final double _ruralRadius = 300;
+  final double _urbanRadius = 100;
+  final double _ruralRadius = 300;
+  String _mapTheme = 'light';
 
   AchievementToastQueue? _toastQueue;
   Timer? _viewportDebounce;
@@ -77,6 +78,7 @@ final double _ruralRadius = 300;
     final last = await StorageService.instance.getLastPosition();
     if (last != null) {
       _currentPosition = LatLng(last.$1, last.$2);
+      _mapTheme = await _settings.getMapTheme();
     }
 
     final onboardingDone = await _settings.isOnboardingCompleted();
@@ -331,6 +333,7 @@ Future<void> _initTileProvider() async {
 
   Widget _buildMapScaffold(BuildContext context) {
     final startCenter = _currentPosition ?? const LatLng(52.5200, 13.4050);
+    final isDarkTheme = _mapTheme == 'dark';
     String? lastTileError;
     return Scaffold(
       body: Stack(
@@ -351,7 +354,9 @@ Future<void> _initTileProvider() async {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=cb1_3x3a_1_7df294938ddb840feac965e2',
+                urlTemplate: isDarkTheme
+                    ? 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=cb1_3x3a_1_7df294938ddb840feac965e2'
+                    : 'https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=cb1_3x3a_1_7df294938ddb840feac965e2',
                 userAgentPackageName: 'com.example.xplored',
                 tileProvider: _tileProvider,
               ),
@@ -369,12 +374,15 @@ Future<void> _initTileProvider() async {
                   stream: _mapController.mapEventStream,
                   builder: (context, _) => CustomPaint(
                     size: Size.infinite,
-                    painter: FogOverlayPainter(
-                    exploredCells: _cells,
-                    camera: _mapController.camera,
-                    urbanRadiusMeters: _urbanRadius,
-                    ruralRadiusMeters: _ruralRadius,
-                  ),
+                      painter: FogOverlayPainter(
+                        exploredCells: _cells,
+                        camera: _mapController.camera,
+                        urbanRadiusMeters: _urbanRadius,
+                        ruralRadiusMeters: _ruralRadius,
+                        fogColor: isDarkTheme
+                            ? const Color(0xE6F0F0F5) // heller, fast weißer Nebel auf dunkler Karte
+                            : const Color(0xCC0A0E1A), // dunkler Nebel auf heller Karte (bisheriger Wert)
+                      ),
                   ),
                 ),
               ),
@@ -442,10 +450,11 @@ Future<void> _initTileProvider() async {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            SettingsScreen(onTrackingToggle: _handleTrackingToggle),
+                        builder: (_) => SettingsScreen(onTrackingToggle: _handleTrackingToggle),
                       ),
                     );
+                    final newTheme = await _settings.getMapTheme();
+                    if (mounted) setState(() => _mapTheme = newTheme);
                   },
                 ),
               ],

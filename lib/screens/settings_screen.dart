@@ -20,6 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _distanceFilter = SettingsService.defaultDistanceFilter;
   bool? _batteryOptimizationIgnored;
   bool _loading = true;
+  String _mapTheme = 'light';
 
   @override
   void initState() {
@@ -30,7 +31,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final tracking = await _settings.isBackgroundTrackingEnabled();
     final filter = await _settings.getDistanceFilterMeters();
-
+    final mapTheme = await _settings.getMapTheme();
     bool? batteryStatus;
     if (Platform.isAndroid) {
       batteryStatus = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
@@ -41,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _trackingEnabled = tracking;
       _distanceFilter = filter;
       _batteryOptimizationIgnored = batteryStatus;
+      _mapTheme = mapTheme;
       _loading = false;
     });
   }
@@ -62,6 +64,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _batteryOptimizationIgnored = status);
   }
 
+  Future<void> _onMapThemeChanged(String theme) async {
+  setState(() => _mapTheme = theme);
+  await _settings.setMapTheme(theme);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -74,6 +81,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _sectionTitle('Erkundung'),
+          const Divider(height: 40),
+          _sectionTitle('Darstellung'),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'light', label: Text('Helle Karte'), icon: Icon(Icons.wb_sunny_outlined)),
+              ButtonSegment(value: 'dark', label: Text('Dunkle Karte'), icon: Icon(Icons.nightlight_outlined)),
+            ],
+            selected: {_mapTheme},
+            onSelectionChanged: (selection) => _onMapThemeChanged(selection.first),
+          ),
           SwitchListTile(
             title: const Text('Hintergrund-Tracking'),
             subtitle: const Text(
