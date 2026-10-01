@@ -23,6 +23,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
 import 'package:http_cache_file_store/http_cache_file_store.dart';
 import 'package:flutter_map_cache/flutter_map_cache.dart';
+import '../services/boundary_service.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
+import '../services/region_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -48,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
   CachedTileProvider? _tileProvider;
+  String? _currentPlaceName;
 
   @override
   void initState() {
@@ -70,9 +74,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _exploration.init();
 
     _exploration.onAchievementUnlocked.listen((definition) {
+      HapticFeedback.mediumImpact();
       _toastQueue?.show(definition);
     });
     _exploration.onPlaceAchievementUnlocked.listen((definition) {
+      HapticFeedback.mediumImpact();
       _toastQueue?.show(definition);
     });
 
@@ -140,12 +146,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _exploration.onNewCellExplored.listen(_onNewCellExplored);
 
     LocationService.instance.positionStream.listen((position) {
-      if (!mounted) return;
-      setState(() {
-        _currentPosition = LatLng(position.latitude, position.longitude);
-        _outsideRegion = !isInsideRegion(position.latitude, position.longitude);
-      });
-    });
+  if (!mounted) return;
+  final lat = position.latitude;
+  final lng = position.longitude;
+  setState(() {
+    _currentPosition = LatLng(lat, lng);
+    _outsideRegion = !isInsideRegion(lat, lng);
+    _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
+  });
+});
 
     setState(() => _tracking = true);
   }
@@ -211,6 +220,7 @@ Future<void> _initTileProvider() async {
           setState(() {
             _currentPosition = LatLng(lat, lng);
             _outsideRegion = !isInsideRegion(lat, lng);
+            _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
           });
         }
       }
@@ -325,10 +335,28 @@ Future<void> _initTileProvider() async {
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshAfterResume();
+@override
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  if (state == AppLifecycleState.resumed) {
+    _exploration.setForeground(true);
+    _handleResumed();
+  } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    _exploration.setForeground(false);
   }
+}
+
+Future<void> _handleResumed() async {
+  if (_loading || !mounted) return;
+  await _exploration.replayQueuedTrack(); // NEU - zuerst die Route nachstellen
+  await _exploration.init(); // Zähler/Caches neu aus der DB
+  _loadedBounds = null;
+  try {
+    await _loadViewportCells();
+  } catch (e) {
+    debugPrint('Refresh nach Resume übersprungen: $e');
+  }
+  if (mounted) setState(() {});
+}
 
   Future<void> _refreshAfterResume() async {
     if (_loading || !mounted) return;
@@ -365,8 +393,8 @@ Future<void> _initTileProvider() async {
   Widget _buildMapScaffold(BuildContext context) {
     final pos = _currentPosition;
     final startCenter = (pos != null && isInsideRegion(pos.latitude, pos.longitude))
-        ? pos
-        : markgraeflerlandCenter;    final isDarkTheme = _mapTheme == 'dark';
+    ? pos
+    : RegionService.instance.config.center;    final isDarkTheme = _mapTheme == 'dark';
     String? lastTileError;
     return Scaffold(
       body: Stack(
@@ -378,7 +406,7 @@ Future<void> _initTileProvider() async {
               initialZoom: 13,
               minZoom: 10,
               maxZoom: 19,
-              cameraConstraint: CameraConstraint.contain(bounds: markgraeflerlandBounds),
+              cameraConstraint: CameraConstraint.contain(bounds: RegionService.instance.config.bounds),
               interactionOptions: const InteractionOptions(
                 flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
@@ -434,6 +462,7 @@ Future<void> _initTileProvider() async {
             exploredCount: _exploration.totalExploredCount,
             areaKm2: _exploration.estimatedExploredAreaKm2,
             tracking: _tracking,
+            placeName: _currentPlaceName,
           ),
           if (lastTileError != null)
             Positioned(
@@ -504,9 +533,9 @@ Future<void> _initTileProvider() async {
                   color: Colors.black.withValues(alpha: 0.75),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  'Du bist außerhalb des Markgräflerlands – hier wird nichts aufgedeckt.',
-                  style: TextStyle(color: Colors.white, fontSize: 13),
+                child: Text(
+                  'Du bist außerhalb ${RegionService.instance.config.displayName} – hier wird nichts aufgedeckt.',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
                 ),
               ),
             ),
@@ -551,11 +580,13 @@ class _StatsBadge extends StatelessWidget {
   final int exploredCount;
   final double areaKm2;
   final bool tracking;
+  final String? placeName; // NEU
 
   const _StatsBadge({
     required this.exploredCount,
     required this.areaKm2,
     required this.tracking,
+    this.placeName,
   });
 
   @override
@@ -569,19 +600,33 @@ class _StatsBadge extends StatelessWidget {
           color: Colors.black.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              tracking ? Icons.gps_fixed : Icons.gps_off,
-              size: 14,
-              color: tracking ? Colors.greenAccent : Colors.grey,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  tracking ? Icons.gps_fixed : Icons.gps_off,
+                  size: 14,
+                  color: tracking ? Colors.greenAccent : Colors.grey,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '${areaKm2.toStringAsFixed(2)} km² erkundet',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(
-              '${areaKm2.toStringAsFixed(2)} km² erkundet',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-            ),
+            if (placeName != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  placeName!,
+                  style: TextStyle(color: Colors.grey[400], fontSize: 11),
+                ),
+              ),
           ],
         ),
       ),

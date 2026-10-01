@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/storage_service.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class PrivacyScreen extends StatelessWidget {
   const PrivacyScreen({super.key});
@@ -71,8 +75,13 @@ class PrivacyScreen extends StatelessWidget {
                 'keinen Namen. Standortdaten werden nicht mit einer Identität '
                 'verknüpft, die über dieses Gerät hinausgeht.',
           ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
+          OutlinedButton.icon(
+              onPressed: () => _exportData(context),
+              icon: const Icon(Icons.ios_share),
+              label: const Text('Daten exportieren'),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: Colors.red[700]),
             onPressed: () => _confirmAndDelete(context),
             icon: const Icon(Icons.delete_forever),
@@ -96,4 +105,17 @@ class PrivacyScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _exportData(BuildContext context) async {
+  final data = await StorageService.instance.exportAllData();
+  final jsonStr = const JsonEncoder.withIndent('  ').convert(data);
+
+  final dir = await getTemporaryDirectory();
+  final file = File('${dir.path}/xplored_backup_${DateTime.now().millisecondsSinceEpoch}.json');
+  await file.writeAsString(jsonStr);
+
+  await SharePlus.instance.share(
+    ShareParams(files: [XFile(file.path)], text: 'XploreD Datensicherung'),
+  );
 }

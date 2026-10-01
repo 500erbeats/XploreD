@@ -142,6 +142,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text('Version'),
             subtitle: Text('0.1.0 (MVP)'),
           ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () async {
+              await _settings.setOnboardingCompleted(false);
+              if (context.mounted) Navigator.pop(context);
+            },
+            icon: const Icon(Icons.restart_alt),
+            label: const Text('Onboarding erneut anzeigen'),
+          ),
         ],
       ),
     );

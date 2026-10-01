@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-
+import 'region_service.dart';
 import '../models/place.dart';
 
 /// Lädt die echten Gemeindegrenzen (OSM-Polygone) und bietet einen
@@ -123,7 +123,7 @@ class BoundaryService {
       return nearestPlace(lat, lng, onlyIfInside: true);
     }
 
-    for (final place in markgraeflerlandPlaces) {
+   for (final place in RegionService.instance.config.places) {
       if (_pointInPlace(point, place.id)) return place;
     }
     return null;

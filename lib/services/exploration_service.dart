@@ -55,9 +55,40 @@ class ExplorationService {
     LocationService.instance.stopTracking();
   }
 
-  Future<void> _handlePosition(Position position) async {
-    await recordVisit(position.latitude, position.longitude);
+bool _inForeground = true;
+
+/// Wird vom HomeScreen beim App-Lifecycle-Wechsel aufgerufen.
+void setForeground(bool value) {
+  _inForeground = value;
+}
+
+Future<void> _handlePosition(Position position) async {
+  final lat = position.latitude;
+  final lng = position.longitude;
+
+  if (_inForeground) {
+    await recordVisit(lat, lng);
+  } else {
+    // Im Hintergrund nur günstig protokollieren - Geohash-Berechnung,
+    // Achievement-Checks und DB-Aggregation erst beim Zurückkehren, um
+    // während des Hintergrundbetriebs möglichst wenig Akku zu verbrauchen.
+    await StorageService.instance.logRawPoint(lat, lng, DateTime.now());
   }
+}
+
+/// Arbeitet alle im Hintergrund gesammelten Punkte in Aufzeichnungs-
+/// reihenfolge ab - "stellt die Route nach" und deckt entsprechend Zellen
+/// auf. Nutzt dieselbe recordVisit()-Pipeline wie Live-Punkte, inklusive
+/// Lückenfüllung (_fillGap) als zusätzliches Sicherheitsnetz.
+Future<void> replayQueuedTrack() async {
+  final queued = await StorageService.instance.getQueuedTrackPoints();
+  if (queued.isEmpty) return;
+
+  for (final point in queued) {
+    await recordVisit(point.lat, point.lng);
+  }
+  await StorageService.instance.clearTrackPoints(queued.map((p) => p.id).toList());
+}
 
   /// Zentrale Methode, vom UI-Isolate und vom Android-Hintergrund-Isolate
   /// aufgerufen. Außerhalb des Spielgebiets passiert bewusst nichts.
@@ -188,4 +219,6 @@ class ExplorationService {
     achievements.dispose();
     placeAchievements.dispose();
   }
+
+  
 }

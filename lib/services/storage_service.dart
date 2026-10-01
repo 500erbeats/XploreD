@@ -3,6 +3,13 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/explored_cell.dart';
 
+
+class QueuedTrackPoint {
+  final int id;
+  final double lat;
+  final double lng;
+  const QueuedTrackPoint({required this.id, required this.lat, required this.lng});
+}
 /// Kapselt die gesamte lokale Persistenz. Offline-first: keinerlei Server-
 /// Abhängigkeit. Schema ist so gehalten, dass eine spätere Cloud-Sync über
 /// ein `synced`-Flag pro Zeile ergänzt werden kann, ohne Kernstruktur zu
@@ -24,19 +31,21 @@ Future<Database> _initDb() async {
 
   return openDatabase(
     path,
-    version: 5,
+    version: 6,
     onCreate: (db, version) async {
       await _createV1Tables(db);
       await _createV2Tables(db);
       await _createV3Indexes(db);
       await _createV4PlaceColumn(db);
       await _createV5VisitedPlaces(db);
+      await _createV6TrackTable(db);
     },
     onUpgrade: (db, oldVersion, newVersion) async {
       if (oldVersion < 2) await _createV2Tables(db);
       if (oldVersion < 3) await _createV3Indexes(db);
       if (oldVersion < 4) await _createV4PlaceColumn(db);
       if (oldVersion < 5) await _createV5VisitedPlaces(db);
+      if (oldVersion < 6) await _createV6TrackTable(db);
     },
   );
 }
@@ -113,6 +122,47 @@ Future<void> _createV4PlaceColumn(Database db) async {
     SELECT place_id, MIN(first_visited) FROM explored_cells
     WHERE place_id IS NOT NULL GROUP BY place_id
   ''');
+}
+
+Future<void> _createV6TrackTable(Database db) async {
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS location_track (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      timestamp INTEGER NOT NULL
+    )
+  ''');
+}
+
+/// Schreibt einen Rohpunkt in die Warteschlange, statt ihn sofort zu
+/// verarbeiten - genutzt, solange die App im Hintergrund läuft.
+Future<void> logRawPoint(double lat, double lng, DateTime timestamp) async {
+  final db = await database;
+  await db.insert('location_track', {
+    'lat': lat,
+    'lng': lng,
+    'timestamp': timestamp.millisecondsSinceEpoch,
+  });
+}
+
+Future<List<QueuedTrackPoint>> getQueuedTrackPoints() async {
+  final db = await database;
+  final rows = await db.query('location_track', orderBy: 'timestamp ASC');
+  return rows
+      .map((r) => QueuedTrackPoint(
+            id: r['id'] as int,
+            lat: r['lat'] as double,
+            lng: r['lng'] as double,
+          ))
+      .toList();
+}
+
+Future<void> clearTrackPoints(List<int> ids) async {
+  if (ids.isEmpty) return;
+  final db = await database;
+  final placeholders = List.filled(ids.length, '?').join(',');
+  await db.delete('location_track', where: 'id IN ($placeholders)', whereArgs: ids);
 }
 
 /// true, wenn der Ort zum ersten Mal als besucht eingetragen wurde.
@@ -295,6 +345,25 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
     return rows.first['value'] as String;
   }
 
+Future<Map<String, dynamic>> exportAllData() async {
+  final db = await database;
+  final cells = await db.query('explored_cells');
+  final visited = await db.query('visited_places');
+  final unlockedAchievements = await db.query('achievements');
+  final days = await db.query('exploration_days');
+  final distance = await getTotalDistanceMeters();
+
+  return {
+    'exportedAt': DateTime.now().toIso8601String(),
+    'schemaVersion': 1,
+    'exploredCells': cells,
+    'visitedPlaces': visited,
+    'achievements': unlockedAchievements,
+    'explorationDays': days,
+    'totalDistanceMeters': distance,
+  };
+}
+
   // ---------- Datenschutz ----------
 
   /// Löscht ALLE lokal gespeicherten Daten - für den Datenschutz-Screen.
@@ -309,5 +378,6 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
     await db.delete('exploration_days');
     await db.delete('achievements');
     await db.delete('visited_places');
+    await db.delete('location_track');
   }
 }

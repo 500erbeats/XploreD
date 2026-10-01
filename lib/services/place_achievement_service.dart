@@ -4,6 +4,7 @@ import '../models/achievement.dart';
 import '../models/place.dart';
 import 'boundary_service.dart';
 import 'storage_service.dart';
+import 'region_service.dart';
 
 /// Orts-Achievements: "Besucht" (einmal im Ort gewesen) und "Erkundet"
 /// (Zellenabdeckung im Ort >= Schwelle).
@@ -26,7 +27,7 @@ class PlaceAchievementService {
         await StorageService.instance.unlockAchievement('visit_$id');
       }
     }
-    if (_visitedCache.length >= markgraeflerlandPlaces.length) {
+    if (_visitedCache.length >= RegionService.instance.config.places.length) {
       await StorageService.instance.unlockAchievement('visit_all');
     }
   }
@@ -52,7 +53,7 @@ class PlaceAchievementService {
       ));
     }
 
-    final total = markgraeflerlandPlaces.length;
+    final total = RegionService.instance.config.places.length;
     if (_visitedCache.length >= total &&
         await StorageService.instance.unlockAchievement('visit_all')) {
       _unlockedController.add(AchievementDefinition(
@@ -89,7 +90,7 @@ class PlaceAchievementService {
   }
 
   Future<void> _checkRegionComplete(Set<String> unlockedSoFar) async {
-    final allPlaceIds = markgraeflerlandPlaces.map((p) => 'place_${p.id}').toSet();
+    final allPlaceIds = RegionService.instance.config.places.map((p) => 'place_${p.id}').toSet();
     if (allPlaceIds.difference(unlockedSoFar).isNotEmpty) return;
 
     final isNew = await StorageService.instance.unlockAchievement('region_complete');
@@ -114,7 +115,7 @@ class PlaceAchievementService {
 
   Future<List<(PlaceDefinition, double)>> getAllProgress() async {
     final results = <(PlaceDefinition, double)>[];
-    for (final place in markgraeflerlandPlaces) {
+    for (final place in RegionService.instance.config.places) {
       results.add((place, await explorationRatio(place)));
     }
     return results;

@@ -36,6 +36,22 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    flavorDimensions += "region"
+    productFlavors {
+        create("markgraeflerland") {
+            dimension = "region"
+            applicationIdSuffix = ".markgraeflerland"
+            resValue(type = "string", name = "app_name", value = "XploreD Markgräflerland")
+        }
+        create("freiburg") {
+            dimension = "region"
+            applicationIdSuffix = ".freiburg"
+            resValue(type = "string", name = "app_name", value = "XploreD Freiburg")
+        }
+    }
+    buildFeatures {
+        resValues = true
+    }
 }
 
 kotlin {
