@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:io' show Platform;
 
 /// Kapselt alle Standort-bezogenen Plattformunterschiede zwischen iOS und
 /// Android an einer zentralen Stelle. Der Rest der App arbeitet nur mit
@@ -72,21 +73,31 @@ class LocationService {
   /// einen eigenen Geolocator-Stream im Isolate (background_task_handler.dart)
   /// und liest den Wert bislang ebenfalls nicht aus den Settings.
   void startTracking({
-    void Function(Position)? onPosition,
-    double distanceFilterMeters = 50,
+  void Function(Position)? onPosition,
+  double distanceFilterMeters = 50,
   }) {
-    final settings = LocationSettings(
-      accuracy: LocationAccuracy.medium,
-      distanceFilter: distanceFilterMeters.round(),
-    );
+    _positionSub?.cancel(); // verhindert doppelte Subscriptions bei erneutem Start
 
-    _positionSub =
-        Geolocator.getPositionStream(locationSettings: settings).listen(
-      (pos) {
-        _controller.add(pos);
-        onPosition?.call(pos);
-      },
-    );
+    final distanceFilter = distanceFilterMeters.round();
+    final LocationSettings settings = Platform.isIOS
+        ? AppleSettings(
+            accuracy: LocationAccuracy.medium,
+            distanceFilter: distanceFilter,
+            activityType: ActivityType.other,
+            pauseLocationUpdatesAutomatically: false,
+            allowBackgroundLocationUpdates: true,
+            // Blaue Statusleiste im Hintergrund: iOS lässt die App dann zuverlässig weiterlaufen.
+            showBackgroundLocationIndicator: true,
+          )
+        : LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            distanceFilter: distanceFilter,
+          );
+
+    _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen((pos) {
+      _controller.add(pos);
+      onPosition?.call(pos);
+    });
   }
 
   Future<Position> getCurrentPosition() {

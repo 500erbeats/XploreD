@@ -31,7 +31,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _mapController = MapController();
   final _exploration = ExplorationService();
   final _settings = SettingsService();
@@ -43,7 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final double _urbanRadius = 100;
   final double _ruralRadius = 300;
   String _mapTheme = 'light';
-
+  bool _outsideRegion = false;
   AchievementToastQueue? _toastQueue;
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
@@ -52,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
   }
 
@@ -142,6 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {
         _currentPosition = LatLng(position.latitude, position.longitude);
+        _outsideRegion = !isInsideRegion(position.latitude, position.longitude);
       });
     });
 
@@ -205,7 +207,12 @@ Future<void> _initTileProvider() async {
       final lat = data['lat'] as double?;
       final lng = data['lng'] as double?;
       if (lat != null && lng != null && mounted) {
-        setState(() => _currentPosition = LatLng(lat, lng));
+        if (lat != null && lng != null && mounted) {
+          setState(() {
+            _currentPosition = LatLng(lat, lng);
+            _outsideRegion = !isInsideRegion(lat, lng);
+          });
+        }
       }
       // Hintergrund-Updates können neue Zellen weit außerhalb des aktuell
       // sichtbaren Bereichs erzeugen (z.B. nach einer Autofahrt) - hier lohnt
@@ -294,10 +301,16 @@ Future<void> _initTileProvider() async {
   }
 
   void _centerOnMyLocation() {
-    if (_currentPosition != null) {
-      _mapController.move(_currentPosition!, _mapController.camera.zoom);
-    }
+  final pos = _currentPosition;
+  if (pos == null) return;
+  if (_outsideRegion) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Du bist gerade außerhalb des Markgräflerlands.')),
+    );
+    return;
   }
+  _mapController.move(pos, _mapController.camera.zoom);
+}
 
   @override
   void dispose() {
@@ -308,7 +321,25 @@ Future<void> _initTileProvider() async {
       _exploration.stopListening();
     }
     _exploration.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshAfterResume();
+  }
+
+  Future<void> _refreshAfterResume() async {
+    if (_loading || !mounted) return;
+    await _exploration.init(); // Zähler und Besuchs-Cache neu aus der DB
+    _loadedBounds = null; // gecachten Kartenausschnitt verwerfen ...
+    try {
+      await _loadViewportCells(); // ... und neu laden
+    } catch (e) {
+      debugPrint('Refresh nach Resume übersprungen: $e');
+    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -332,8 +363,10 @@ Future<void> _initTileProvider() async {
   }
 
   Widget _buildMapScaffold(BuildContext context) {
-    final startCenter = _currentPosition ?? const LatLng(52.5200, 13.4050);
-    final isDarkTheme = _mapTheme == 'dark';
+    final pos = _currentPosition;
+    final startCenter = (pos != null && isInsideRegion(pos.latitude, pos.longitude))
+        ? pos
+        : markgraeflerlandCenter;    final isDarkTheme = _mapTheme == 'dark';
     String? lastTileError;
     return Scaffold(
       body: Stack(
@@ -460,6 +493,23 @@ Future<void> _initTileProvider() async {
               ],
             ),
           ),
+          if (_outsideRegion)
+            Positioned(
+              left: 16,
+              right: 88,
+              bottom: 32,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.75),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'Du bist außerhalb des Markgräflerlands – hier wird nichts aufgedeckt.',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+            ),
           Positioned(
             right: 16,
             bottom: 32,
@@ -555,3 +605,4 @@ class _NavIconButton extends StatelessWidget {
     );
   }
 }
+

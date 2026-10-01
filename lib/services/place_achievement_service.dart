@@ -1,26 +1,72 @@
 import 'dart:async';
+
 import '../models/achievement.dart';
 import '../models/place.dart';
-import 'storage_service.dart';
 import 'boundary_service.dart';
+import 'storage_service.dart';
 
-/// Prüft Orts-Achievements: ein Ort gilt als "erkundet", wenn die geschätzte
-/// Zellenabdeckung innerhalb seines Radius einen Schwellenwert erreicht.
-/// Läuft parallel zum globalen AchievementService, weil die Prüfung
-/// ortsbezogene DB-Abfragen braucht, die nicht in den globalen StatsSnapshot
-/// passen.
+/// Orts-Achievements: "Besucht" (einmal im Ort gewesen) und "Erkundet"
+/// (Zellenabdeckung im Ort >= Schwelle).
 class PlaceAchievementService {
   static const double _completionThreshold = 0.85;
-  static const double _cellAreaM2 = 150 * 150; // ~Geohash-Zellenfläche
+  static const double _cellAreaM2 = 150 * 150;
 
   final _unlockedController = StreamController<AchievementDefinition>.broadcast();
   Stream<AchievementDefinition> get onUnlocked => _unlockedController.stream;
 
-  /// Prüft NUR den Ort, in dem der übergebene Punkt liegt - nicht bei jedem
-  /// GPS-Update alle 12 Orte durchrechnen, aus Performance-Gründen.
+  Set<String> _visitedCache = {};
+
+  /// Lädt besuchte Orte in den Speicher und pflegt fehlende "Besucht"-
+  /// Achievements still nach (z.B. nach der DB-Migration, ohne Toast-Flut).
+  Future<void> init() async {
+    _visitedCache = await StorageService.instance.getVisitedPlaceIds();
+    final unlocked = await StorageService.instance.getUnlockedAchievementIds();
+    for (final id in _visitedCache) {
+      if (!unlocked.contains('visit_$id')) {
+        await StorageService.instance.unlockAchievement('visit_$id');
+      }
+    }
+    if (_visitedCache.length >= markgraeflerlandPlaces.length) {
+      await StorageService.instance.unlockAchievement('visit_all');
+    }
+  }
+
+  Future<Set<String>> getVisitedIds() => StorageService.instance.getVisitedPlaceIds();
+
+  /// Wird für jeden Punkt aufgerufen, der in einem Ort liegt (echt oder interpoliert).
+  Future<void> registerVisit(PlaceDefinition place) async {
+    if (_visitedCache.contains(place.id)) return; // billiger Check im Speicher
+
+    final isNew = await StorageService.instance.markPlaceVisited(place.id);
+    // Cache neu laden: der Hintergrund-Isolate schreibt in dieselbe Tabelle.
+    _visitedCache = await StorageService.instance.getVisitedPlaceIds();
+    if (!isNew) return;
+
+    final id = 'visit_${place.id}';
+    if (await StorageService.instance.unlockAchievement(id)) {
+      _unlockedController.add(AchievementDefinition(
+        id: id,
+        title: 'Besucht: ${place.name}',
+        description: '${place.name} zum ersten Mal besucht.',
+        isUnlocked: (_) => true,
+      ));
+    }
+
+    final total = markgraeflerlandPlaces.length;
+    if (_visitedCache.length >= total &&
+        await StorageService.instance.unlockAchievement('visit_all')) {
+      _unlockedController.add(AchievementDefinition(
+        id: 'visit_all',
+        title: 'Alle $total Orte besucht!',
+        description: 'Du warst in jedem Ort des Markgräflerlands.',
+        isUnlocked: (_) => true,
+      ));
+    }
+  }
+
   Future<void> checkPlaceAt(double lat, double lng) async {
-    final place = nearestPlace(lat, lng, onlyIfInside: true);
-    if (place == null) return; // Punkt liegt auf dem Land, kein Ort betroffen.
+    final place = BoundaryService.instance.placeContaining(lat, lng);
+    if (place == null) return;
 
     final unlocked = await StorageService.instance.getUnlockedAchievementIds();
     final achievementId = 'place_${place.id}';
@@ -45,6 +91,7 @@ class PlaceAchievementService {
   Future<void> _checkRegionComplete(Set<String> unlockedSoFar) async {
     final allPlaceIds = markgraeflerlandPlaces.map((p) => 'place_${p.id}').toSet();
     if (allPlaceIds.difference(unlockedSoFar).isNotEmpty) return;
+
     final isNew = await StorageService.instance.unlockAchievement('region_complete');
     if (isNew) {
       _unlockedController.add(AchievementDefinition(
@@ -56,22 +103,15 @@ class PlaceAchievementService {
     }
   }
 
-  /// Grobe Schätzung: tatsächlich erkundete Zellen im Ortsradius geteilt
-  /// durch die geschätzte Anzahl Zellen, die die Kreisfläche des Ortes
-  /// komplett abdecken würde. 0.85 statt 1.0 als Schwelle, weil das
-  /// Geohash-Raster einen Kreis nie perfekt lückenlos abdeckt.
- Future<double> explorationRatio(PlaceDefinition place) async {
-  // Direkter, indexierter COUNT-Query statt Bounding-Box-Laden + Punkt-in-
-  // Polygon-Filterung - die Zuordnung steckt ja schon gecached in der DB.
-  final withinBoundary = await StorageService.instance.getExploredCellCountForPlace(place.id);
+  Future<double> explorationRatio(PlaceDefinition place) async {
+    final withinBoundary =
+        await StorageService.instance.getExploredCellCountForPlace(place.id);
+    final areaKm2 = BoundaryService.instance.areaKm2(place.id);
+    final expectedCells = (areaKm2 * 1000000) / _cellAreaM2;
+    if (expectedCells <= 0) return 0;
+    return (withinBoundary / expectedCells).clamp(0.0, 1.0);
+  }
 
-  final areaKm2 = BoundaryService.instance.areaKm2(place.id);
-  final expectedCells = (areaKm2 * 1000000) / _cellAreaM2;
-  if (expectedCells <= 0) return 0;
-  return (withinBoundary / expectedCells).clamp(0.0, 1.0);
-}
-
-  /// Für den Stats-Screen: Fortschritt aller Orte auf einmal.
   Future<List<(PlaceDefinition, double)>> getAllProgress() async {
     final results = <(PlaceDefinition, double)>[];
     for (final place in markgraeflerlandPlaces) {

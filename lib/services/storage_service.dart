@@ -24,17 +24,19 @@ Future<Database> _initDb() async {
 
   return openDatabase(
     path,
-    version: 4,
+    version: 5,
     onCreate: (db, version) async {
       await _createV1Tables(db);
       await _createV2Tables(db);
       await _createV3Indexes(db);
       await _createV4PlaceColumn(db);
+      await _createV5VisitedPlaces(db);
     },
     onUpgrade: (db, oldVersion, newVersion) async {
       if (oldVersion < 2) await _createV2Tables(db);
       if (oldVersion < 3) await _createV3Indexes(db);
       if (oldVersion < 4) await _createV4PlaceColumn(db);
+      if (oldVersion < 5) await _createV5VisitedPlaces(db);
     },
   );
 }
@@ -97,6 +99,38 @@ Future<void> _createV4PlaceColumn(Database db) async {
       ON explored_cells (center_lat, center_lng)
     ''');
   }
+
+  Future<void> _createV5VisitedPlaces(Database db) async {
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS visited_places (
+      place_id TEXT PRIMARY KEY,
+      first_visited INTEGER NOT NULL
+    )
+  ''');
+  // Nachpflege: Orte, in denen schon Zellen erkundet wurden, zählen als besucht.
+  await db.execute('''
+    INSERT OR IGNORE INTO visited_places (place_id, first_visited)
+    SELECT place_id, MIN(first_visited) FROM explored_cells
+    WHERE place_id IS NOT NULL GROUP BY place_id
+  ''');
+}
+
+/// true, wenn der Ort zum ersten Mal als besucht eingetragen wurde.
+Future<bool> markPlaceVisited(String placeId) async {
+  final db = await database;
+  final rows = await db.insert(
+    'visited_places',
+    {'place_id': placeId, 'first_visited': DateTime.now().millisecondsSinceEpoch},
+    conflictAlgorithm: ConflictAlgorithm.ignore,
+  );
+  return rows != 0;
+}
+
+Future<Set<String>> getVisitedPlaceIds() async {
+  final db = await database;
+  final rows = await db.query('visited_places');
+  return rows.map((r) => r['place_id'] as String).toSet();
+}
 
   // ---------- Erkundete Zellen ----------
 
@@ -274,5 +308,6 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
     await db.delete('app_state');
     await db.delete('exploration_days');
     await db.delete('achievements');
+    await db.delete('visited_places');
   }
 }

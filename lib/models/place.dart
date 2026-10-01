@@ -71,3 +71,9 @@ PlaceDefinition? nearestPlace(double lat, double lng, {bool onlyIfInside = false
   }
   return closest;
 }
+/// Mittelpunkt der Region: Startposition der Karte, falls keine gültige Position bekannt ist.
+const LatLng markgraeflerlandCenter = LatLng(47.76, 7.675);
+
+/// true, wenn der Punkt im Spielgebiet liegt. Außerhalb wird nichts aufgedeckt.
+bool isInsideRegion(double lat, double lng) =>
+    markgraeflerlandBounds.contains(LatLng(lat, lng));
