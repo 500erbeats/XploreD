@@ -52,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   LatLngBounds? _loadedBounds;
   CachedTileProvider? _tileProvider;
   String? _currentPlaceName;
+  bool _autoRecenterPaused = false;
 
   @override
   void initState() {
@@ -145,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _exploration.onNewCellExplored.listen(_onNewCellExplored);
 
-    LocationService.instance.positionStream.listen((position) {
+  LocationService.instance.positionStream.listen((position) {
   if (!mounted) return;
   final lat = position.latitude;
   final lng = position.longitude;
@@ -154,6 +155,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _outsideRegion = !isInsideRegion(lat, lng);
     _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
   });
+  _recenterIfNearEdge(); // NEU - nach dem setState, Widget ist dann aktuell
 });
 
     setState(() => _tracking = true);
@@ -216,12 +218,13 @@ Future<void> _initTileProvider() async {
       final lat = data['lat'] as double?;
       final lng = data['lng'] as double?;
       if (lat != null && lng != null && mounted) {
-        if (lat != null && lng != null && mounted) {
+       if (lat != null && lng != null && mounted) {
           setState(() {
             _currentPosition = LatLng(lat, lng);
             _outsideRegion = !isInsideRegion(lat, lng);
             _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
           });
+          _recenterIfNearEdge(); // NEU
         }
       }
       // Hintergrund-Updates können neue Zellen weit außerhalb des aktuell
@@ -231,6 +234,33 @@ Future<void> _initTileProvider() async {
       _checkAchievementsAfterBackgroundUpdate();
     }
   }
+
+  /// Rückt die Karte nach, sobald der aktuelle Standort zu nah an den
+/// Bildschirmrand kommt - kein starres Mitziehen, damit man die bereits
+/// aufgedeckte Fläche weiterhin frei ansehen kann, ohne dass jede GPS-
+/// Aktualisierung die Kamera zurückreißt.
+void _recenterIfNearEdge() {
+  if (_autoRecenterPaused) return; // NEU
+  final pos = _currentPosition;
+  if (pos == null || _outsideRegion || !mounted) return;
+
+  final camera = _mapController.camera;
+  final screenPoint = camera.latLngToScreenPoint(pos);
+  final size = MediaQuery.sizeOf(context);
+
+  const marginFraction = 0.18; // Bei 18% Abstand zum Rand wird nachgerückt.
+  final marginX = size.width * marginFraction;
+  final marginY = size.height * marginFraction;
+
+  final nearEdge = screenPoint.x < marginX ||
+      screenPoint.x > size.width - marginX ||
+      screenPoint.y < marginY ||
+      screenPoint.y > size.height - marginY;
+
+  if (nearEdge) {
+    _mapController.move(pos, camera.zoom);
+  }
+}
 
   /// Der Hintergrund-Isolate (background_task_handler.dart) schaltet
   /// Achievements bereits selbst frei, meldet sie aber nicht an die UI.
@@ -310,7 +340,7 @@ Future<void> _initTileProvider() async {
     );
   }
 
-  void _centerOnMyLocation() {
+void _centerOnMyLocation() {
   final pos = _currentPosition;
   if (pos == null) return;
   if (_outsideRegion) {
@@ -319,6 +349,7 @@ Future<void> _initTileProvider() async {
     );
     return;
   }
+  _autoRecenterPaused = false; // NEU - Nachrücken reaktivieren
   _mapController.move(pos, _mapController.camera.zoom);
 }
 
@@ -356,6 +387,17 @@ Future<void> _handleResumed() async {
     debugPrint('Refresh nach Resume übersprungen: $e');
   }
   if (mounted) setState(() {});
+}
+
+void _onMapEvent(MapEvent event) {
+  _scheduleViewportLoad();
+
+  // Nur echte Nutzer-Gesten pausieren das Nachrücken - unsere eigenen
+  // programmatischen _mapController.move()-Aufrufe (Quelle: mapController)
+  // sollen die Pause nicht versehentlich selbst wieder auslösen.
+  if (event.source != MapEventSource.mapController) {
+    _autoRecenterPaused = true;
+  }
 }
 
   Future<void> _refreshAfterResume() async {
@@ -410,7 +452,7 @@ Future<void> _handleResumed() async {
               interactionOptions: const InteractionOptions(
                 flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
-              onMapEvent: (event) => _scheduleViewportLoad(),
+              onMapEvent: _onMapEvent,
               onMapReady: _loadViewportCells,
             ),
             children: [
