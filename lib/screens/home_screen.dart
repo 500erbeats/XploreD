@@ -1,14 +1,22 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, Directory;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:http_cache_file_store/http_cache_file_store.dart';
+import 'package:flutter_map_cache/flutter_map_cache.dart';
+
 import '../models/explored_cell.dart';
+import '../models/place.dart';
 import '../services/background_task_handler.dart';
+import '../services/boundary_service.dart';
 import '../services/exploration_service.dart';
 import '../services/location_service.dart';
+import '../services/region_service.dart';
 import '../services/settings_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/achievement_toast.dart';
@@ -17,15 +25,6 @@ import 'onboarding_screen.dart';
 import 'privacy_screen.dart';
 import 'settings_screen.dart';
 import 'stats_screen.dart';
-import '../models/place.dart';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
-import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
-import 'package:http_cache_file_store/http_cache_file_store.dart';
-import 'package:flutter_map_cache/flutter_map_cache.dart';
-import '../services/boundary_service.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
-import '../services/region_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -43,15 +42,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   LatLng? _currentPosition;
   bool _tracking = false;
   bool _loading = true;
+  bool _outsideRegion = false;
+  String? _currentPlaceName;
+  String _mapTheme = 'light';
+  String? _cartoApiKey;
+
   final double _urbanRadius = 100;
   final double _ruralRadius = 300;
-  String _mapTheme = 'light';
-  bool _outsideRegion = false;
+
+  CachedTileProvider? _tileProvider;
   AchievementToastQueue? _toastQueue;
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
-  CachedTileProvider? _tileProvider;
-  String? _currentPlaceName;
   bool _autoRecenterPaused = false;
 
   @override
@@ -64,14 +66,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Braucht den Overlay-Context aus dem Widget-Baum - in initState() noch
-    // nicht sicher verfügbar, deshalb hier statt dort.
     _toastQueue ??= AchievementToastQueue(Overlay.of(context));
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _exploration.setForeground(true);
+      _handleResumed();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _exploration.setForeground(false);
+    }
+  }
+
+  Future<void> _handleResumed() async {
+    if (_loading || !mounted) return;
+    await _exploration.replayQueuedTrack();
+    await _exploration.init();
+    _loadedBounds = null;
+    try {
+      await _loadViewportCells();
+    } catch (e) {
+      debugPrint('Refresh nach Resume übersprungen: $e');
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _initTileProvider() async {
+    final cacheDir = await getTemporaryDirectory();
+    final cachePath = '${cacheDir.path}/map_tiles';
+    await Directory(cachePath).create(recursive: true);
+
+    _tileProvider = CachedTileProvider(
+      maxStale: const Duration(days: 30),
+      store: FileCacheStore(cachePath),
+    );
+  }
+
   Future<void> _bootstrap() async {
-  await _initTileProvider(); // NEU - vor allem anderen
-  try {
+    await _initTileProvider();
     await _exploration.init();
 
     _exploration.onAchievementUnlocked.listen((definition) {
@@ -86,13 +119,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final last = await StorageService.instance.getLastPosition();
     if (last != null) {
       _currentPosition = LatLng(last.$1, last.$2);
-      _mapTheme = await _settings.getMapTheme();
+      _outsideRegion = !isInsideRegion(last.$1, last.$2);
+      _currentPlaceName = BoundaryService.instance.placeContaining(last.$1, last.$2)?.name;
     }
-
+    _mapTheme = await _settings.getMapTheme();
+    _cartoApiKey = await _settings.getCartoApiKey();
     final onboardingDone = await _settings.isOnboardingCompleted();
     if (!onboardingDone) {
-      // build() zeigt den OnboardingScreen; der Permission-/Tracking-Teil
-      // läuft danach über _onOnboardingFinished().
       setState(() => _loading = false);
       return;
     }
@@ -109,15 +142,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     setState(() => _loading = false);
   }
-  catch (e, stack) {
-    debugPrint('FEHLER in _bootstrap: $e');
-    debugPrint('$stack');
-    if (mounted) setState(() => _loading = false); // Spinner in jedem Fall beenden
-  }
-}
-  
-  /// Wird vom OnboardingScreen aufgerufen, sobald der Nutzer ihn durchlaufen
-  /// hat - startet danach den normalen Tracking-Pfad.
+
   Future<void> _onOnboardingFinished() async {
     setState(() => _loading = true);
 
@@ -133,9 +158,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startTracking() async {
-    // Hinweis (offener Punkt): dieser Wert wird aktuell nur für den Android-
-    // Foreground-Task-Start geladen, aber noch nicht bis ins tatsächliche
-    // GPS-Sampling durchgereicht - siehe Kommentar in LocationService.startTracking().
     final distanceFilter = await _settings.getDistanceFilterMeters();
 
     if (Platform.isAndroid) {
@@ -146,59 +168,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _exploration.onNewCellExplored.listen(_onNewCellExplored);
 
-  LocationService.instance.positionStream.listen((position) {
-  if (!mounted) return;
-  final lat = position.latitude;
-  final lng = position.longitude;
-  setState(() {
-    _currentPosition = LatLng(lat, lng);
-    _outsideRegion = !isInsideRegion(lat, lng);
-    _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
-  });
-  _recenterIfNearEdge(); // NEU - nach dem setState, Widget ist dann aktuell
-});
+    LocationService.instance.positionStream.listen((position) {
+      if (!mounted) return;
+      final lat = position.latitude;
+      final lng = position.longitude;
+      setState(() {
+        _currentPosition = LatLng(lat, lng);
+        _outsideRegion = !isInsideRegion(lat, lng);
+        _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
+      });
+      _recenterIfNearEdge();
+    });
 
     setState(() => _tracking = true);
   }
 
-Future<void> _initTileProvider() async {
-  final cacheDir = await getTemporaryDirectory();
-  final cachePath = '${cacheDir.path}/map_tiles';
-  await Directory(cachePath).create(recursive: true);
-
-  _tileProvider = CachedTileProvider(
-    maxStale: const Duration(days: 30),
-    store: FileCacheStore(cachePath),
-  );
-}
-
   Future<void> _startAndroidForegroundTracking(double distanceFilter) async {
-  final notificationPermission =
-      await FlutterForegroundTask.checkNotificationPermission();
-  if (notificationPermission != NotificationPermission.granted) {
-    await FlutterForegroundTask.requestNotificationPermission();
-  }
-  if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-    await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    final notificationPermission = await FlutterForegroundTask.checkNotificationPermission();
+    if (notificationPermission != NotificationPermission.granted) {
+      await FlutterForegroundTask.requestNotificationPermission();
+    }
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    }
+
+    FlutterForegroundTask.addTaskDataCallback(_onBackgroundData);
+
+    try {
+      final result = await FlutterForegroundTask.startService(
+        notificationTitle: 'XploreD',
+        notificationText: 'Erkundung läuft im Hintergrund',
+        callback: startCallback,
+      );
+      debugPrint('Foreground service start result: $result');
+    } catch (e, stack) {
+      debugPrint('FEHLER beim Starten des Foreground Service: $e');
+      debugPrint('$stack');
+    }
   }
 
-  FlutterForegroundTask.addTaskDataCallback(_onBackgroundData);
-
-  try {
-    final result = await FlutterForegroundTask.startService(
-      notificationTitle: 'XploreD',
-      notificationText: 'Erkundung läuft im Hintergrund',
-      callback: startCallback,
-    );
-    debugPrint('Foreground service start result: $result');
-  } catch (e, stack) {
-    debugPrint('FEHLER beim Starten des Foreground Service: $e');
-    debugPrint('$stack');
-  }
-}
-
-  /// Wird vom Settings-Screen aufgerufen, wenn der Nutzer den Tracking-
-  /// Schalter umlegt.
   Future<void> _handleTrackingToggle(bool enabled) async {
     if (enabled) {
       await _startTracking();
@@ -218,62 +226,23 @@ Future<void> _initTileProvider() async {
       final lat = data['lat'] as double?;
       final lng = data['lng'] as double?;
       if (lat != null && lng != null && mounted) {
-       if (lat != null && lng != null && mounted) {
-          setState(() {
-            _currentPosition = LatLng(lat, lng);
-            _outsideRegion = !isInsideRegion(lat, lng);
-            _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
-          });
-          _recenterIfNearEdge(); // NEU
-        }
+        setState(() {
+          _currentPosition = LatLng(lat, lng);
+          _outsideRegion = !isInsideRegion(lat, lng);
+          _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
+        });
+        _recenterIfNearEdge();
       }
-      // Hintergrund-Updates können neue Zellen weit außerhalb des aktuell
-      // sichtbaren Bereichs erzeugen (z.B. nach einer Autofahrt) - hier lohnt
-      // sich ein gezielter Reload statt der lokalen Ergänzungslogik unten.
       _loadViewportCells();
       _checkAchievementsAfterBackgroundUpdate();
     }
   }
 
-  /// Rückt die Karte nach, sobald der aktuelle Standort zu nah an den
-/// Bildschirmrand kommt - kein starres Mitziehen, damit man die bereits
-/// aufgedeckte Fläche weiterhin frei ansehen kann, ohne dass jede GPS-
-/// Aktualisierung die Kamera zurückreißt.
-void _recenterIfNearEdge() {
-  if (_autoRecenterPaused) return; // NEU
-  final pos = _currentPosition;
-  if (pos == null || _outsideRegion || !mounted) return;
-
-  final camera = _mapController.camera;
-  final screenPoint = camera.latLngToScreenPoint(pos);
-  final size = MediaQuery.sizeOf(context);
-
-  const marginFraction = 0.18; // Bei 18% Abstand zum Rand wird nachgerückt.
-  final marginX = size.width * marginFraction;
-  final marginY = size.height * marginFraction;
-
-  final nearEdge = screenPoint.x < marginX ||
-      screenPoint.x > size.width - marginX ||
-      screenPoint.y < marginY ||
-      screenPoint.y > size.height - marginY;
-
-  if (nearEdge) {
-    _mapController.move(pos, camera.zoom);
-  }
-}
-
-  /// Der Hintergrund-Isolate (background_task_handler.dart) schaltet
-  /// Achievements bereits selbst frei, meldet sie aber nicht an die UI.
-  /// unlockAchievement() ist idempotent, ein erneuter Check ist also
-  /// gefahrlos möglich.
   Future<void> _checkAchievementsAfterBackgroundUpdate() async {
     final stats = await _exploration.getStats();
     await _exploration.achievements.checkAll(stats);
   }
 
-  /// Ergänzt eine neu erkundete Zelle lokal, wenn sie im aktuell geladenen
-  /// Viewport-Bereich liegt - vermeidet einen kompletten Reload bei jeder
-  /// einzelnen neuen Zelle.
   void _onNewCellExplored(ExploredCell cell) {
     final loaded = _loadedBounds;
     if (loaded == null) return;
@@ -284,14 +253,11 @@ void _recenterIfNearEdge() {
     }
   }
 
-  /// Debounced um 300ms, damit während eines Drags/Zooms nicht dutzende
-  /// Queries feuern.
   void _scheduleViewportLoad() {
     _viewportDebounce?.cancel();
     _viewportDebounce = Timer(const Duration(milliseconds: 300), _loadViewportCells);
   }
 
-  /// Lädt nur Zellen im sichtbaren Kartenausschnitt plus 50% Randpuffer.
   Future<void> _loadViewportCells() async {
     final bounds = _mapController.camera.visibleBounds;
     final latPad = (bounds.north - bounds.south) * 0.5;
@@ -320,6 +286,38 @@ void _recenterIfNearEdge() {
     });
   }
 
+  /// Rückt die Karte nach, sobald der Standort zu nah an den Bildschirmrand
+  /// kommt - kein starres Mitziehen, pausiert bei manuellem Scrollen.
+  void _recenterIfNearEdge() {
+    if (_autoRecenterPaused) return;
+    final pos = _currentPosition;
+    if (pos == null || _outsideRegion || !mounted) return;
+
+    final camera = _mapController.camera;
+    final screenPoint = camera.latLngToScreenPoint(pos);
+    final size = MediaQuery.sizeOf(context);
+
+    const marginFraction = 0.18;
+    final marginX = size.width * marginFraction;
+    final marginY = size.height * marginFraction;
+
+    final nearEdge = screenPoint.x < marginX ||
+        screenPoint.x > size.width - marginX ||
+        screenPoint.y < marginY ||
+        screenPoint.y > size.height - marginY;
+
+    if (nearEdge) {
+      _mapController.move(pos, camera.zoom);
+    }
+  }
+
+  void _onMapEvent(MapEvent event) {
+    _scheduleViewportLoad();
+    if (event.source != MapEventSource.mapController) {
+      _autoRecenterPaused = true;
+    }
+  }
+
   void _showPermissionDeniedDialog() {
     showDialog(
       context: context,
@@ -340,21 +338,26 @@ void _recenterIfNearEdge() {
     );
   }
 
-void _centerOnMyLocation() {
-  final pos = _currentPosition;
-  if (pos == null) return;
-  if (_outsideRegion) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Du bist gerade außerhalb des Markgräflerlands.')),
-    );
-    return;
+  void _centerOnMyLocation() {
+    final pos = _currentPosition;
+    if (pos == null) return;
+    if (_outsideRegion) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Du bist gerade außerhalb von ${RegionService.instance.config.displayName}.',
+          ),
+        ),
+      );
+      return;
+    }
+    _autoRecenterPaused = false;
+    _mapController.move(pos, _mapController.camera.zoom);
   }
-  _autoRecenterPaused = false; // NEU - Nachrücken reaktivieren
-  _mapController.move(pos, _mapController.camera.zoom);
-}
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _viewportDebounce?.cancel();
     if (Platform.isAndroid) {
       FlutterForegroundTask.removeTaskDataCallback(_onBackgroundData);
@@ -362,54 +365,7 @@ void _centerOnMyLocation() {
       _exploration.stopListening();
     }
     _exploration.dispose();
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-@override
-void didChangeAppLifecycleState(AppLifecycleState state) {
-  if (state == AppLifecycleState.resumed) {
-    _exploration.setForeground(true);
-    _handleResumed();
-  } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-    _exploration.setForeground(false);
-  }
-}
-
-Future<void> _handleResumed() async {
-  if (_loading || !mounted) return;
-  await _exploration.replayQueuedTrack(); // NEU - zuerst die Route nachstellen
-  await _exploration.init(); // Zähler/Caches neu aus der DB
-  _loadedBounds = null;
-  try {
-    await _loadViewportCells();
-  } catch (e) {
-    debugPrint('Refresh nach Resume übersprungen: $e');
-  }
-  if (mounted) setState(() {});
-}
-
-void _onMapEvent(MapEvent event) {
-  _scheduleViewportLoad();
-
-  // Nur echte Nutzer-Gesten pausieren das Nachrücken - unsere eigenen
-  // programmatischen _mapController.move()-Aufrufe (Quelle: mapController)
-  // sollen die Pause nicht versehentlich selbst wieder auslösen.
-  if (event.source != MapEventSource.mapController) {
-    _autoRecenterPaused = true;
-  }
-}
-
-  Future<void> _refreshAfterResume() async {
-    if (_loading || !mounted) return;
-    await _exploration.init(); // Zähler und Besuchs-Cache neu aus der DB
-    _loadedBounds = null; // gecachten Kartenausschnitt verwerfen ...
-    try {
-      await _loadViewportCells(); // ... und neu laden
-    } catch (e) {
-      debugPrint('Refresh nach Resume übersprungen: $e');
-    }
-    if (mounted) setState(() {});
   }
 
   @override
@@ -432,64 +388,58 @@ void _onMapEvent(MapEvent event) {
     );
   }
 
-  Widget _buildMapScaffold(BuildContext context) {
-    final pos = _currentPosition;
-    final startCenter = (pos != null && isInsideRegion(pos.latitude, pos.longitude))
-    ? pos
-    : RegionService.instance.config.center;    final isDarkTheme = _mapTheme == 'dark';
-    String? lastTileError;
-    return Scaffold(
-      body: Stack(
-        children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: startCenter,
-              initialZoom: 13,
-              minZoom: 10,
-              maxZoom: 19,
-              cameraConstraint: CameraConstraint.contain(bounds: RegionService.instance.config.bounds),
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onMapEvent: _onMapEvent,
-              onMapReady: _loadViewportCells,
+ Widget _buildMapScaffold(BuildContext context) {
+  final region = RegionService.instance.config;
+  final pos = _currentPosition;
+  final startCenter =
+      (pos != null && isInsideRegion(pos.latitude, pos.longitude)) ? pos : region.center;
+  final isDarkTheme = _mapTheme == 'dark';
+  final hasCartoKey = _cartoApiKey != null && _cartoApiKey!.isNotEmpty;
+
+  return Scaffold(
+    body: Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: startCenter,
+            initialZoom: 13,
+            minZoom: 9,
+            maxZoom: 19,
+            cameraConstraint: CameraConstraint.contain(bounds: region.bounds),
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
             ),
-            children: [
+            onMapEvent: _onMapEvent,
+            onMapReady: _loadViewportCells,
+          ),
+          children: [
+            if (hasCartoKey)
               TileLayer(
                 urlTemplate: isDarkTheme
-                    ? 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=cb1_3x3a_1_7df294938ddb840feac965e2'
-                    : 'https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=cb1_3x3a_1_7df294938ddb840feac965e2',
+                    ? 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=$_cartoApiKey'
+                    : 'https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=$_cartoApiKey',
                 userAgentPackageName: 'com.example.xplored',
                 tileProvider: _tileProvider,
               ),
-              RichAttributionWidget(
-                attributions: [
-                  TextSourceAttribution(
-                    '© OpenStreetMap contributors © CARTO',
-                    onTap: () {},
-                  ),
-                ],
-              ),
-             // Fog-of-War-Ebene: reagiert auf Kamera-Änderungen (Pan/Zoom).
               MobileLayerTransformer(
                 child: StreamBuilder<MapEvent>(
                   stream: _mapController.mapEventStream,
                   builder: (context, _) => CustomPaint(
                     size: Size.infinite,
-                      painter: FogOverlayPainter(
-                        exploredCells: _cells,
-                        camera: _mapController.camera,
-                        urbanRadiusMeters: _urbanRadius,
-                        ruralRadiusMeters: _ruralRadius,
-                        fogColor: isDarkTheme
-                            ? const Color(0xE6F0F0F5) // heller, fast weißer Nebel auf dunkler Karte
-                            : const Color(0xCC0A0E1A), // dunkler Nebel auf heller Karte (bisheriger Wert)
-                      ),
+                    painter: FogOverlayPainter(
+                      exploredCells: _cells,
+                      camera: _mapController.camera,
+                      urbanRadiusMeters: _urbanRadius,
+                      ruralRadiusMeters: _ruralRadius,
+                      fogColor: isDarkTheme
+                          ? const Color(0xE6F0F0F5)
+                          : const Color(0xCC0A0E1A),
+                    ),
                   ),
                 ),
               ),
-              if (_currentPosition != null)
+              if (_currentPosition != null && !_outsideRegion)
                 MarkerLayer(markers: [
                   Marker(
                     point: _currentPosition!,
@@ -500,31 +450,12 @@ void _onMapEvent(MapEvent event) {
                 ]),
             ],
           ),
-         _StatsBadge(
+          _StatsBadge(
             exploredCount: _exploration.totalExploredCount,
             areaKm2: _exploration.estimatedExploredAreaKm2,
             tracking: _tracking,
             placeName: _currentPlaceName,
           ),
-          if (lastTileError != null)
-            Positioned(
-              top: 100,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Tile-Fehler: $lastTileError',
-                  style: const TextStyle(color: Colors.white, fontSize: 11),
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
           Positioned(
             top: 56,
             right: 16,
@@ -534,9 +465,7 @@ void _onMapEvent(MapEvent event) {
                   icon: Icons.bar_chart,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => StatsScreen(exploration: _exploration),
-                    ),
+                    MaterialPageRoute(builder: (_) => StatsScreen(exploration: _exploration)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -558,7 +487,13 @@ void _onMapEvent(MapEvent event) {
                       ),
                     );
                     final newTheme = await _settings.getMapTheme();
-                    if (mounted) setState(() => _mapTheme = newTheme);
+                    final newKey = await _settings.getCartoApiKey();
+                    if (mounted) {
+                      setState(() {
+                        _mapTheme = newTheme;
+                        _cartoApiKey = newKey;
+                      });
+                    }
                   },
                 ),
               ],
@@ -576,7 +511,7 @@ void _onMapEvent(MapEvent event) {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  'Du bist außerhalb ${RegionService.instance.config.displayName} – hier wird nichts aufgedeckt.',
+                  'Du bist außerhalb ${region.displayName} – hier wird nichts aufgedeckt.',
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                 ),
               ),
@@ -590,7 +525,37 @@ void _onMapEvent(MapEvent event) {
               child: const Icon(Icons.my_location),
             ),
           ),
-        ],
+          
+          if (!hasCartoKey)
+          Positioned(
+            left: 16,
+            right: 16,
+            top: 120,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Text(
+                    'Kein Kartenanbieter konfiguriert',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Trag in den Einstellungen einen kostenlosen CARTO API-Key ein, '
+                    'um die Kartenkacheln zu laden.',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ], 
       ),
     );
   }
@@ -622,7 +587,7 @@ class _StatsBadge extends StatelessWidget {
   final int exploredCount;
   final double areaKm2;
   final bool tracking;
-  final String? placeName; // NEU
+  final String? placeName;
 
   const _StatsBadge({
     required this.exploredCount,
@@ -692,4 +657,3 @@ class _NavIconButton extends StatelessWidget {
     );
   }
 }
-

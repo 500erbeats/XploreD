@@ -72,33 +72,40 @@ class LocationService {
   /// (nutzt also den Default 50m) - der Android-Hintergrundpfad läuft über
   /// einen eigenen Geolocator-Stream im Isolate (background_task_handler.dart)
   /// und liest den Wert bislang ebenfalls nicht aus den Settings.
-  void startTracking({
-  void Function(Position)? onPosition,
+  Future<void>? _processingChain;
+
+void startTracking({
+  Future<void> Function(Position)? onPosition, // war vorher: void Function(Position)?
   double distanceFilterMeters = 50,
-  }) {
-    _positionSub?.cancel(); // verhindert doppelte Subscriptions bei erneutem Start
+}) {
+  _positionSub?.cancel();
 
-    final distanceFilter = distanceFilterMeters.round();
-    final LocationSettings settings = Platform.isIOS
-        ? AppleSettings(
-            accuracy: LocationAccuracy.medium,
-            distanceFilter: distanceFilter,
-            activityType: ActivityType.other,
-            pauseLocationUpdatesAutomatically: false,
-            allowBackgroundLocationUpdates: true,
-            // Blaue Statusleiste im Hintergrund: iOS lässt die App dann zuverlässig weiterlaufen.
-            showBackgroundLocationIndicator: true,
-          )
-        : LocationSettings(
-            accuracy: LocationAccuracy.medium,
-            distanceFilter: distanceFilter,
-          );
+  final distanceFilter = distanceFilterMeters.round();
+  final LocationSettings settings = Platform.isIOS
+      ? AppleSettings(
+          accuracy: LocationAccuracy.medium,
+          distanceFilter: distanceFilter,
+          activityType: ActivityType.other,
+          pauseLocationUpdatesAutomatically: false,
+          allowBackgroundLocationUpdates: true,
+          showBackgroundLocationIndicator: true,
+        )
+      : LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          distanceFilter: distanceFilter,
+        );
 
-    _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen((pos) {
-      _controller.add(pos);
-      onPosition?.call(pos);
+  _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen((pos) {
+    _controller.add(pos);
+    // Serialisiert: jeder Aufruf wartet auf den vorherigen, statt parallel
+    // zu laufen. Verhindert Race Conditions zwischen recordVisit()-Aufrufen,
+    // falls zwei GPS-Fixes kurz hintereinander eintreffen (iOS liefert im
+    // Hintergrund/Simulator oft erst einen groben, dann einen präzisen Fix).
+    _processingChain = (_processingChain ?? Future.value()).then((_) async {
+      await onPosition?.call(pos);
     });
-  }
+  });
+}
 
   Future<Position> getCurrentPosition() {
     return Geolocator.getCurrentPosition(

@@ -43,9 +43,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/markgraeflerland_boundaries.geojson
-    - assets/freiburg_boundaries.geojson
-
+    - assets/breisgau_hochschwarzwald_boundaries.geojson
 
 flutter_launcher_icons:
   android: true

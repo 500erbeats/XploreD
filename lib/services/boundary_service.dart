@@ -21,7 +21,7 @@ class BoundaryService {
   Future<void> load() async {
     if (_loaded) return;
 
-    final raw = await rootBundle.loadString('assets/markgraeflerland_boundaries.geojson');
+    final raw = await rootBundle.loadString(RegionService.instance.config.boundariesAssetPath);
     final decoded = jsonDecode(raw) as Map<String, dynamic>;
     final features = decoded['features'] as List<dynamic>;
 

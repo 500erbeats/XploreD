@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Xcode" xmlns="http://www.topografix.com/GPX/1/1">
+    <wpt lat="47.999000" lon="7.842100">
+        <name>Freiburg im Breisgau</name>
+    </wpt>
+    <wpt lat="47.954700" lon="7.842800">
+        <name>Au</name>
+    </wpt>
+    <wpt lat="47.784400" lon="7.595600">
+        <name>Auggen</name>
+    </wpt>
+    <wpt lat="47.918900" lon="7.695800">
+        <name>Bad Krozingen</name>
+    </wpt>
+    <wpt lat="47.802200" lon="7.674400">
+        <name>Badenweiler</name>
+    </wpt>
+    <wpt lat="47.858600" lon="7.697500">
+        <name>Ballrechten-Dottingen</name>
+    </wpt>
+    <wpt lat="47.921100" lon="7.787800">
+        <name>Bollschweil</name>
+    </wpt>
+    <wpt lat="48.077200" lon="7.724700">
+        <name>Bötzingen</name>
+    </wpt>
+    <wpt lat="48.031900" lon="7.584700">
+        <name>Breisach am Rhein</name>
+    </wpt>
+    <wpt lat="47.940300" lon="8.077500">
+        <name>Breitnau</name>
+    </wpt>
+    <wpt lat="47.961900" lon="8.010300">
+        <name>Buchenbach</name>
+    </wpt>
+    <wpt lat="47.847500" lon="7.636700">
+        <name>Buggingen</name>
+    </wpt>
+    <wpt lat="47.957800" lon="7.780600">
+        <name>Ebringen</name>
+    </wpt>
+    <wpt lat="47.915800" lon="7.751700">
+        <name>Ehrenkirchen</name>
+    </wpt>
+    <wpt lat="48.094400" lon="7.743100">
+        <name>Eichstetten am Kaiserstuhl</name>
+    </wpt>
+    <wpt lat="47.962500" lon="8.271100">
+        <name>Eisenbach (Hochschwarzwald)</name>
+    </wpt>
+    <wpt lat="47.888900" lon="7.653600">
+        <name>Eschbach</name>
+    </wpt>
+    <wpt lat="47.855800" lon="8.036100">
+        <name>Feldberg (Schwarzwald)</name>
+    </wpt>
+    <wpt lat="47.918600" lon="8.254700">
+        <name>Friedenweiler</name>
+    </wpt>
+    <wpt lat="48.048900" lon="7.952500">
+        <name>Glottertal</name>
+    </wpt>
+    <wpt lat="48.049400" lon="7.728900">
+        <name>Gottenheim</name>
+    </wpt>
+    <wpt lat="48.042200" lon="7.865600">
+        <name>Gundelfingen</name>
+    </wpt>
+    <wpt lat="47.936400" lon="7.628900">
+        <name>Hartheim am Rhein</name>
+    </wpt>
+    <wpt lat="47.874400" lon="7.665600">
+        <name>Heitersheim</name>
+    </wpt>
+    <wpt lat="48.053100" lon="7.893900">
+        <name>Heuweiler</name>
+    </wpt>
+    <wpt lat="47.907800" lon="8.102800">
+        <name>Hinterzarten</name>
+    </wpt>
+    <wpt lat="47.935600" lon="7.855800">
+        <name>Horben</name>
+    </wpt>
+    <wpt lat="48.044200" lon="7.647200">
+        <name>Ihringen</name>
+    </wpt>
+    <wpt lat="47.963900" lon="7.952500">
+        <name>Kirchzarten</name>
+    </wpt>
+    <wpt lat="47.868300" lon="8.204200">
+        <name>Lenzkirch</name>
+    </wpt>
+    <wpt lat="47.883900" lon="8.343900">
+        <name>Löffingen</name>
+    </wpt>
+    <wpt lat="48.054400" lon="7.788900">
+        <name>March</name>
+    </wpt>
+    <wpt lat="48.018300" lon="7.690800">
+        <name>Merdingen</name>
+    </wpt>
+    <wpt lat="47.965800" lon="7.828600">
+        <name>Merzhausen</name>
+    </wpt>
+    <wpt lat="47.807500" lon="7.625600">
+        <name>Müllheim im Markgräflerland</name>
+    </wpt>
+    <wpt lat="47.859400" lon="7.786900">
+        <name>Münstertal/Schwarzwald</name>
+    </wpt>
+    <wpt lat="47.814400" lon="7.561900">
+        <name>Neuenburg am Rhein</name>
+    </wpt>
+    <wpt lat="47.931700" lon="7.948300">
+        <name>Oberried</name>
+    </wpt>
+    <wpt lat="47.936100" lon="7.754200">
+        <name>Pfaffenweiler</name>
+    </wpt>
+    <wpt lat="47.957500" lon="7.750800">
+        <name>Schallstadt</name>
+    </wpt>
+    <wpt lat="47.820300" lon="8.181400">
+        <name>Schluchsee</name>
+    </wpt>
+    <wpt lat="47.946700" lon="7.810600">
+        <name>Sölden</name>
+    </wpt>
+    <wpt lat="47.881700" lon="7.731700">
+        <name>Staufen im Breisgau</name>
+    </wpt>
+    <wpt lat="47.983900" lon="7.962200">
+        <name>Stegen</name>
+    </wpt>
+    <wpt lat="48.007800" lon="8.094400">
+        <name>St. Märgen</name>
+    </wpt>
+    <wpt lat="48.016400" lon="8.032500">
+        <name>St. Peter</name>
+    </wpt>
+    <wpt lat="47.840600" lon="7.708900">
+        <name>Sulzburg</name>
+    </wpt>
+    <wpt lat="47.912500" lon="8.213900">
+        <name>Titisee-Neustadt</name>
+    </wpt>
+    <wpt lat="48.017500" lon="7.763100">
+        <name>Umkirch</name>
+    </wpt>
+    <wpt lat="48.098900" lon="7.632200">
+        <name>Vogtsburg im Kaiserstuhl</name>
+    </wpt>
+    <wpt lat="47.945800" lon="7.814400">
+        <name>Wittnau</name>
+    </wpt>
+</gpx>

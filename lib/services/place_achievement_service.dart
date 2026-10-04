@@ -59,7 +59,7 @@ class PlaceAchievementService {
       _unlockedController.add(AchievementDefinition(
         id: 'visit_all',
         title: 'Alle $total Orte besucht!',
-        description: 'Du warst in jedem Ort des Markgräflerlands.',
+        description: 'Du warst in jedem Ort von ${RegionService.instance.config.displayName}.',
         isUnlocked: (_) => true,
       ));
     }
@@ -97,7 +97,7 @@ class PlaceAchievementService {
     if (isNew) {
       _unlockedController.add(AchievementDefinition(
         id: 'region_complete',
-        title: 'Markgräflerland komplett!',
+        title: '${RegionService.instance.config.displayName} komplett!',
         description: 'Alle Orte der Region vollständig erkundet.',
         isUnlocked: (_) => true,
       ));

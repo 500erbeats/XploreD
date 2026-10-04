@@ -345,6 +345,24 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
     return rows.first['value'] as String;
   }
 
+  /// Alle Zellen, deren Orts-Zugehörigkeit noch nicht berechnet wurde
+/// (typischerweise Alt-Daten von vor der place_id-Migration).
+Future<List<ExploredCell>> getCellsWithoutPlaceId() async {
+  final db = await database;
+  final rows = await db.query('explored_cells', where: 'place_id IS NULL');
+  return rows.map(ExploredCell.fromMap).toList();
+}
+
+Future<void> updateCellPlaceId(String geohash, String? placeId) async {
+  final db = await database;
+  await db.update(
+    'explored_cells',
+    {'place_id': placeId},
+    where: 'geohash = ?',
+    whereArgs: [geohash],
+  );
+}
+
 Future<Map<String, dynamic>> exportAllData() async {
   final db = await database;
   final cells = await db.query('explored_cells');

@@ -8,7 +8,17 @@ class SettingsService {
   static const _keyOnboardingCompleted = 'onboarding_completed';
   static const _keyMapTheme = 'map_theme'; 
   static const defaultDistanceFilter = 50.0;
+  static const _keyPlaceIdBackfillDone = 'place_id_backfill_done';
+  static const _keyCartoApiKey = 'carto_api_key';
 
+  Future<bool> isPlaceIdBackfillDone() async {
+    final value = await StorageService.instance.getSetting(_keyPlaceIdBackfillDone);
+    return value == 'true';
+  }
+
+  Future<void> setPlaceIdBackfillDone(bool done) {
+    return StorageService.instance.setSetting(_keyPlaceIdBackfillDone, '$done');
+  }
   Future<bool> isBackgroundTrackingEnabled() async {
     final value = await StorageService.instance.getSetting(_keyBackgroundTracking);
     return value != 'false'; // Standardmäßig aktiviert.
@@ -46,4 +56,13 @@ Future<String> getMapTheme() async {
 Future<void> setMapTheme(String theme) {
   return StorageService.instance.setSetting(_keyMapTheme, theme);
 }
+
+Future<String?> getCartoApiKey() async {
+  return StorageService.instance.getSetting(_keyCartoApiKey);
+}
+
+Future<void> setCartoApiKey(String key) {
+  return StorageService.instance.setSetting(_keyCartoApiKey, key);
+}
+
 }

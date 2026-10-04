@@ -21,6 +21,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool? _batteryOptimizationIgnored;
   bool _loading = true;
   String _mapTheme = 'light';
+  final _cartoKeyController = TextEditingController();
 
   @override
   void initState() {
@@ -32,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final tracking = await _settings.isBackgroundTrackingEnabled();
     final filter = await _settings.getDistanceFilterMeters();
     final mapTheme = await _settings.getMapTheme();
+    final cartoKey = await _settings.getCartoApiKey();
     bool? batteryStatus;
     if (Platform.isAndroid) {
       batteryStatus = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
@@ -42,6 +44,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _trackingEnabled = tracking;
       _distanceFilter = filter;
       _batteryOptimizationIgnored = batteryStatus;
+      _cartoKeyController.text = cartoKey ?? '';
       _mapTheme = mapTheme;
       _loading = false;
     });
@@ -68,6 +71,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   setState(() => _mapTheme = theme);
   await _settings.setMapTheme(theme);
   }
+
+  Future<void> _saveCartoKey() async {
+  final key = _cartoKeyController.text.trim();
+  await _settings.setCartoApiKey(key);
+  if (mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('API-Key gespeichert.')),
+    );
+  }
+}
+
+@override
+void dispose() {
+  _cartoKeyController.dispose();
+  super.dispose();
+}
 
   @override
   Widget build(BuildContext context) {
@@ -110,6 +129,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             divisions: 9,
             onChanged: _onDistanceFilterChanged,
           ),
+
+          const Divider(height: 40),
+            _sectionTitle('Kartenanbieter'),
+            TextField(
+              controller: _cartoKeyController,
+              decoration: const InputDecoration(
+                labelText: 'CARTO API-Key',
+                hintText: 'Kostenlos unter carto.com/basemaps/apikey',
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(onPressed: _saveCartoKey, child: const Text('Key speichern')),
+            ),
+            
           const Divider(height: 40),
           if (Platform.isAndroid) ...[
             _sectionTitle('Akku (Android)'),

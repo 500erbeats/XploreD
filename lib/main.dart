@@ -1,3 +1,4 @@
-import 'main_markgraeflerland.dart' as flavor;
+import 'app_bootstrap.dart';
+import 'regions/breisgau_hochschwarzwald_region.dart';
 
-void main() => flavor.main();
+void main() => bootstrapAndRun(breisgauHochschwarzwaldRegion);
