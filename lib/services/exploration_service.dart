@@ -43,10 +43,8 @@ class ExplorationService {
   await _backfillMissingPlaceIds(); // NEU
 }
 
-/// Einmaliger Nachtrag: berechnet place_id für alle Zellen, die vor der
-/// place_id-Spalte (bzw. vor dem aktuellen Grenzdaten-Stand) erkundet
-/// wurden und deshalb noch NULL haben. Läuft nur einmal, danach per Flag
-/// übersprungen.
+/// Einmaliger Nachtrag: berechnet place_id für alle Zellen, die noch NULL
+/// haben. Läuft nur einmal, danach per Flag übersprungen.
 Future<void> _backfillMissingPlaceIds() async {
   final settings = SettingsService();
   final done = await settings.isPlaceIdBackfillDone();

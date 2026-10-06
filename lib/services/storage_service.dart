@@ -345,8 +345,9 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
     return rows.first['value'] as String;
   }
 
-  /// Alle Zellen, deren Orts-Zugehörigkeit noch nicht berechnet wurde
-/// (typischerweise Alt-Daten von vor der place_id-Migration).
+/// Alle Zellen, deren Orts-Zugehörigkeit noch nicht berechnet wurde
+/// (typischerweise Alt-Daten von vor der place_id-Migration bzw. von vor
+/// dem Boundary-Pfad-Fix).
 Future<List<ExploredCell>> getCellsWithoutPlaceId() async {
   final db = await database;
   final rows = await db.query('explored_cells', where: 'place_id IS NULL');

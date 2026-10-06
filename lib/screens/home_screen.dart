@@ -124,6 +124,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     _mapTheme = await _settings.getMapTheme();
     _cartoApiKey = await _settings.getCartoApiKey();
+
     final onboardingDone = await _settings.isOnboardingCompleted();
     if (!onboardingDone) {
       setState(() => _loading = false);
@@ -388,40 +389,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
- Widget _buildMapScaffold(BuildContext context) {
-  final region = RegionService.instance.config;
-  final pos = _currentPosition;
-  final startCenter =
-      (pos != null && isInsideRegion(pos.latitude, pos.longitude)) ? pos : region.center;
-  final isDarkTheme = _mapTheme == 'dark';
-  final hasCartoKey = _cartoApiKey != null && _cartoApiKey!.isNotEmpty;
+  Widget _buildMapScaffold(BuildContext context) {
+    final region = RegionService.instance.config;
+    final pos = _currentPosition;
+    final startCenter =
+        (pos != null && isInsideRegion(pos.latitude, pos.longitude)) ? pos : region.center;
+    final isDarkTheme = _mapTheme == 'dark';
+    final hasCartoKey = _cartoApiKey != null && _cartoApiKey!.isNotEmpty;
 
-  return Scaffold(
-    body: Stack(
-      children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: startCenter,
-            initialZoom: 13,
-            minZoom: 9,
-            maxZoom: 19,
-            cameraConstraint: CameraConstraint.contain(bounds: region.bounds),
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-            ),
-            onMapEvent: _onMapEvent,
-            onMapReady: _loadViewportCells,
-          ),
-          children: [
-            if (hasCartoKey)
-              TileLayer(
-                urlTemplate: isDarkTheme
-                    ? 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=$_cartoApiKey'
-                    : 'https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=$_cartoApiKey',
-                userAgentPackageName: 'com.example.xplored',
-                tileProvider: _tileProvider,
+    return Scaffold(
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: startCenter,
+              initialZoom: 13,
+              minZoom: 9,
+              maxZoom: 19,
+              cameraConstraint: CameraConstraint.contain(bounds: region.bounds),
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
+              onMapEvent: _onMapEvent,
+              onMapReady: _loadViewportCells,
+            ),
+            children: [
+              if (hasCartoKey)
+                TileLayer(
+                  urlTemplate: isDarkTheme
+                      ? 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=$_cartoApiKey'
+                      : 'https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=$_cartoApiKey',
+                  userAgentPackageName: 'com.example.xplored',
+                  tileProvider: _tileProvider,
+                ),
               MobileLayerTransformer(
                 child: StreamBuilder<MapEvent>(
                   stream: _mapController.mapEventStream,
@@ -516,6 +517,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+          if (!hasCartoKey)
+            Positioned(
+              left: 16,
+              right: 16,
+              top: 120,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Kein Kartenanbieter konfiguriert',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Trag in den Einstellungen einen kostenlosen CARTO API-Key ein, '
+                      'um die Kartenkacheln zu laden.',
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Positioned(
             right: 16,
             bottom: 32,
@@ -525,37 +555,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: const Icon(Icons.my_location),
             ),
           ),
-          
-          if (!hasCartoKey)
-          Positioned(
-            left: 16,
-            right: 16,
-            top: 120,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text(
-                    'Kein Kartenanbieter konfiguriert',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Trag in den Einstellungen einen kostenlosen CARTO API-Key ein, '
-                    'um die Kartenkacheln zu laden.',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ], 
+        ],
       ),
     );
   }

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../services/settings_service.dart';
+import '../services/tile_download_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final Future<void> Function(bool enabled) onTrackingToggle;
@@ -15,18 +17,33 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _settings = SettingsService();
+  final _tileDownload = TileDownloadService();
+  final _cartoKeyController = TextEditingController();
 
   bool _trackingEnabled = true;
   double _distanceFilter = SettingsService.defaultDistanceFilter;
   bool? _batteryOptimizationIgnored;
   bool _loading = true;
   String _mapTheme = 'light';
-  final _cartoKeyController = TextEditingController();
+  DateTime? _lastSync;
+  TileDownloadProgress? _downloadProgress;
+  StreamSubscription<TileDownloadProgress>? _progressSub;
 
   @override
   void initState() {
     super.initState();
+    _progressSub = _tileDownload.onProgress.listen((p) {
+      if (mounted) setState(() => _downloadProgress = p);
+    });
     _load();
+  }
+
+  @override
+  void dispose() {
+    _progressSub?.cancel();
+    _tileDownload.dispose();
+    _cartoKeyController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -34,6 +51,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final filter = await _settings.getDistanceFilterMeters();
     final mapTheme = await _settings.getMapTheme();
     final cartoKey = await _settings.getCartoApiKey();
+    final lastSync = await _settings.getLastTileSyncAt();
+
     bool? batteryStatus;
     if (Platform.isAndroid) {
       batteryStatus = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
@@ -44,8 +63,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _trackingEnabled = tracking;
       _distanceFilter = filter;
       _batteryOptimizationIgnored = batteryStatus;
-      _cartoKeyController.text = cartoKey ?? '';
       _mapTheme = mapTheme;
+      _cartoKeyController.text = cartoKey ?? '';
+      _lastSync = lastSync;
       _loading = false;
     });
   }
@@ -68,25 +88,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _onMapThemeChanged(String theme) async {
-  setState(() => _mapTheme = theme);
-  await _settings.setMapTheme(theme);
+    setState(() => _mapTheme = theme);
+    await _settings.setMapTheme(theme);
   }
 
   Future<void> _saveCartoKey() async {
-  final key = _cartoKeyController.text.trim();
-  await _settings.setCartoApiKey(key);
-  if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('API-Key gespeichert.')),
-    );
+    final key = _cartoKeyController.text.trim();
+    await _settings.setCartoApiKey(key);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('API-Key gespeichert.')),
+      );
+    }
   }
-}
 
-@override
-void dispose() {
-  _cartoKeyController.dispose();
-  super.dispose();
-}
+  Future<void> _confirmAndDownloadTiles() async {
+    final apiKey = _cartoKeyController.text.trim();
+    if (apiKey.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Erst einen API-Key eintragen und speichern.')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Karte vorladen?'),
+        content: const Text(
+          'Das lädt die komplette Region in mittlerer Zoomstufe herunter '
+          '(ca. 100–180 MB). Straßenebene wird weiterhin nur dort nachgeladen, '
+          'wo du tatsächlich unterwegs bist.\n\n'
+          'Empfohlen: über WLAN, nicht über mobile Daten.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Abbrechen')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Herunterladen')),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    await _downloadTiles(apiKey);
+  }
+
+  Future<void> _downloadTiles(String apiKey) async {
+    await _tileDownload.downloadRegion(apiKey: apiKey, darkTheme: _mapTheme == 'dark');
+    final newSync = await _settings.getLastTileSyncAt();
+    if (mounted) {
+      setState(() {
+        _lastSync = newSync;
+        _downloadProgress = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Karte wurde für Offline-Nutzung vorgeladen.')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -129,24 +187,48 @@ void dispose() {
             divisions: 9,
             onChanged: _onDistanceFilterChanged,
           ),
-
           const Divider(height: 40),
-            _sectionTitle('Kartenanbieter'),
-            TextField(
-              controller: _cartoKeyController,
-              decoration: const InputDecoration(
-                labelText: 'CARTO API-Key',
-                hintText: 'Kostenlos unter carto.com/basemaps/apikey',
-                border: OutlineInputBorder(),
-              ),
-              obscureText: true,
+          _sectionTitle('Kartenanbieter'),
+          TextField(
+            controller: _cartoKeyController,
+            decoration: const InputDecoration(
+              labelText: 'CARTO API-Key',
+              hintText: 'Kostenlos unter carto.com/basemaps/apikey',
+              border: OutlineInputBorder(),
+            ),
+            obscureText: true,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(onPressed: _saveCartoKey, child: const Text('Key speichern')),
+          ),
+          const SizedBox(height: 16),
+          if (_downloadProgress != null) ...[
+            LinearProgressIndicator(value: _downloadProgress!.ratio),
+            const SizedBox(height: 4),
+            Text(
+              '${_downloadProgress!.done}/${_downloadProgress!.total} Kacheln geladen',
+              style: TextStyle(color: Colors.grey[400], fontSize: 12),
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(onPressed: _saveCartoKey, child: const Text('Key speichern')),
+          ] else ...[
+            Text(
+              _lastSync != null
+                  ? 'Zuletzt vorgeladen: ${_lastSync!.day}.${_lastSync!.month}.${_lastSync!.year}'
+                  : 'Noch nicht vorgeladen',
+              style: TextStyle(color: Colors.grey[400], fontSize: 12),
             ),
-            
+            const SizedBox(height: 8),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _tileDownload.isRunning ? null : _confirmAndDownloadTiles,
+              icon: const Icon(Icons.download_for_offline_outlined),
+              label: Text(_lastSync == null ? 'Karte vorladen' : 'Karte neu laden'),
+            ),
+          ),
           const Divider(height: 40),
           if (Platform.isAndroid) ...[
             _sectionTitle('Akku (Android)'),
