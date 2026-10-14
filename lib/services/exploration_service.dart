@@ -30,18 +30,22 @@ class ExplorationService {
   int get totalExploredCount => _totalExploredCount;
 
   bool _inForeground = true;
+  bool _isFirstPointOfSession = true;
   void setForeground(bool value) => _inForeground = value;
 
   Future<void> init() async {
   _totalExploredCount = await StorageService.instance.getExploredCellCount();
+  _isFirstPointOfSession = true; // NEU - jede frische Instanz = neue Sitzung
   try {
     await BoundaryService.instance.load();
   } catch (e) {
     debugPrint('Grenzdaten konnten nicht geladen werden: $e');
   }
   await placeAchievements.init();
-  await _backfillMissingPlaceIds(); // NEU
+  await _backfillMissingPlaceIds();
 }
+
+
 
 /// Einmaliger Nachtrag: berechnet place_id für alle Zellen, die noch NULL
 /// haben. Läuft nur einmal, danach per Flag übersprungen.
@@ -94,25 +98,30 @@ Future<void> _backfillMissingPlaceIds() async {
 
   /// Zentrale Methode. Außerhalb des Spielgebiets passiert bewusst nichts.
 Future<void> recordVisit(double lat, double lng) async {
-    final start = DateTime.now();
-    debugPrint('recordVisit START $start: $lat, $lng');    if (!isInsideRegion(lat, lng)) return;
+  if (!isInsideRegion(lat, lng)) return;
 
-    final last = await StorageService.instance.getLastPosition();
+  final last = await StorageService.instance.getLastPosition();
 
-    await _processPoint(lat, lng, isInterpolated: false);
-    if (last != null) {
-      await _fillGap(last.$1, last.$2, lat, lng);
-      await _trackDistance(last.$1, last.$2, lat, lng);
-    }
+  // Der allererste Punkt nach einem (Neu-)Start verbindet sich NICHT mit
+  // der zuletzt gespeicherten Position aus einer früheren Sitzung - die
+  // App könnte in der Zwischenzeit komplett beendet gewesen sein, dann
+  // wäre die Lücke dazwischen reine Spekulation statt echter Erkundung.
+  final skipGapFill = _isFirstPointOfSession;
+  _isFirstPointOfSession = false;
 
-    await StorageService.instance.recordExplorationDay(DateTime.now());
-    await StorageService.instance.saveLastPosition(lat, lng);
-
-    final stats = await getStats();
-    await achievements.checkAll(stats);
-    await placeAchievements.checkPlaceAt(lat, lng);
-    debugPrint('recordVisit ENDE ${DateTime.now()}: $lat, $lng');
+  await _processPoint(lat, lng, isInterpolated: false);
+  if (last != null && !skipGapFill) {
+    await _fillGap(last.$1, last.$2, lat, lng);
+    await _trackDistance(last.$1, last.$2, lat, lng);
   }
+
+  await StorageService.instance.recordExplorationDay(DateTime.now());
+  await StorageService.instance.saveLastPosition(lat, lng);
+
+  final stats = await getStats();
+  await achievements.checkAll(stats);
+  await placeAchievements.checkPlaceAt(lat, lng);
+}
 
   /// [isInterpolated] = true für Lückenfüll-Punkte: deckt NUR die eigene
   /// Zelle auf, keine Nachbarn - echte GPS-Fixes decken weiterhin den vollen

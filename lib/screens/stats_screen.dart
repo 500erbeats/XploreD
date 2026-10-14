@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import '../models/achievement.dart';
-import '../services/exploration_service.dart';
 import '../models/place.dart';
+import '../services/exploration_service.dart';
 import '../services/storage_service.dart';
+
+const Map<AchievementTier, Color> _tierColors = {
+  AchievementTier.bronze: Color(0xFFCD7F32),
+  AchievementTier.silver: Color(0xFFC0C6D0),
+  AchievementTier.gold: Color(0xFFFFC107),
+};
 
 class StatsScreen extends StatefulWidget {
   final ExplorationService exploration;
@@ -23,9 +29,8 @@ class _StatsScreenState extends State<StatsScreen> {
     _statsFuture = widget.exploration.getStats();
     _achievementsFuture = widget.exploration.achievements.getAllWithStatus();
     _placesFuture = _loadPlaces();
-  } // <- initState endet HIER
+  }
 
-  // Eigene Methode der Klasse, nicht in initState verschachtelt:
   Future<_PlaceProgressData> _loadPlaces() async {
     final visited = await StorageService.instance.getVisitedPlaceIds();
     final progress = await widget.exploration.placeAchievements.getAllProgress();
@@ -63,6 +68,9 @@ class _StatsScreenState extends State<StatsScreen> {
               const SizedBox(height: 24),
               Text('Achievements', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
+              ...tieredAchievements.map(
+                (t) => _TieredAchievementCard(definition: t, value: t.valueOf(stats)),
+              ),
               FutureBuilder<List<(AchievementDefinition, bool)>>(
                 future: _achievementsFuture,
                 builder: (context, achSnapshot) {
@@ -130,6 +138,115 @@ class _StatsGrid extends StatelessWidget {
   }
 }
 
+/// Karte für ein Achievement mit drei Stufen: Medaille in der Farbe der
+/// höchsten erreichten Stufe, darunter eine Leiste aus drei Segmenten, die
+/// sich nacheinander in Bronze, Silber und Gold füllen.
+class _TieredAchievementCard extends StatelessWidget {
+  final TieredAchievementDefinition definition;
+  final num value;
+  const _TieredAchievementCard({required this.definition, required this.value});
+
+  double _segmentFill(int i) {
+    final num start = i == 0 ? 0 : definition.thresholds[i - 1];
+    final num end = definition.thresholds[i];
+    return ((value - start) / (end - start)).clamp(0.0, 1.0).toDouble();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reached = definition.tiersReached(value);
+    final medalColor =
+        reached == 0 ? Colors.grey : _tierColors[AchievementTier.values[reached - 1]]!;
+    final valueText = definition.decimals == 0
+        ? formatNumber(value)
+        : value.toStringAsFixed(definition.decimals);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.workspace_premium, color: medalColor, size: 26),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    definition.title,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                ),
+                Text(
+                  '$valueText ${definition.unit}',
+                  style: TextStyle(color: Colors.grey[300], fontSize: 13),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: List.generate(3, (i) {
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: i < 2 ? 4 : 0),
+                    child: _TierSegment(
+                      fill: _segmentFill(i),
+                      color: _tierColors[AchievementTier.values[i]]!,
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: List.generate(3, (i) {
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: i < 2 ? 4 : 0),
+                    child: Text(
+                      formatNumber(definition.thresholds[i]),
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: i < reached
+                            ? _tierColors[AchievementTier.values[i]]!
+                            : Colors.grey[500],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TierSegment extends StatelessWidget {
+  final double fill;
+  final Color color;
+  const _TierSegment({required this.fill, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        height: 10,
+        color: Colors.white12,
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: fill,
+          child: Container(color: color),
+        ),
+      ),
+    );
+  }
+}
+
 class _AchievementTile extends StatelessWidget {
   final AchievementDefinition definition;
   final bool unlocked;
@@ -150,6 +267,7 @@ class _AchievementTile extends StatelessWidget {
     );
   }
 }
+
 class _PlaceProgressData {
   final Set<String> visited;
   final List<(PlaceDefinition, double)> progress;
@@ -174,7 +292,8 @@ class _PlacesSection extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('$visited/$total', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text('$visited/$total',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
             Text(total == 0 ? '' : '${(visited / total * 100).round()} %'),
           ],
         ),
