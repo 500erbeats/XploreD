@@ -122,4 +122,12 @@ final List<TieredAchievementDefinition> tieredAchievements = [
     thresholds: [7, 14, 31],
     valueOf: (s) => s.longestStreak,
   ),
+  TieredAchievementDefinition(
+    id: 'area',
+    title: 'Erkundete Fläche',
+    unit: 'km²',
+    thresholds: [10, 50, 100],
+    valueOf: (s) => s.areaKm2,
+    decimals: 1,
+  ),
 ];

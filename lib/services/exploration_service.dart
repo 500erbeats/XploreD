@@ -33,16 +33,17 @@ class ExplorationService {
   bool _isFirstPointOfSession = true;
   void setForeground(bool value) => _inForeground = value;
 
-  Future<void> init() async {
+ Future<void> init() async {
   _totalExploredCount = await StorageService.instance.getExploredCellCount();
-  _isFirstPointOfSession = true; // NEU - jede frische Instanz = neue Sitzung
   try {
     await BoundaryService.instance.load();
   } catch (e) {
     debugPrint('Grenzdaten konnten nicht geladen werden: $e');
   }
-  await placeAchievements.init();
+  // Reihenfolge wichtig: erst place_id für Altzellen nachtragen, dann die
+  // Besucht-Prüfung, denn die liest die place_id aus den Zellen.
   await _backfillMissingPlaceIds();
+  await placeAchievements.init();
 }
 
 

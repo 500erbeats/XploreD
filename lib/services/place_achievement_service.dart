@@ -20,17 +20,22 @@ class PlaceAchievementService {
   /// Lädt besuchte Orte in den Speicher und pflegt fehlende "Besucht"-
   /// Achievements still nach (z.B. nach der DB-Migration, ohne Toast-Flut).
   Future<void> init() async {
-    _visitedCache = await StorageService.instance.getVisitedPlaceIds();
-    final unlocked = await StorageService.instance.getUnlockedAchievementIds();
-    for (final id in _visitedCache) {
-      if (!unlocked.contains('visit_$id')) {
-        await StorageService.instance.unlockAchievement('visit_$id');
-      }
-    }
-    if (_visitedCache.length >= RegionService.instance.config.places.length) {
-      await StorageService.instance.unlockAchievement('visit_all');
+  // Nachträgliche Prüfung: Jeder Ort mit mindestens einer erkundeten Zelle
+  // (also > 0 %) gilt als besucht - auch wenn die Zellen über Lückenfüllung,
+  // Hintergrund-Nachstellen oder den place_id-Nachtrag entstanden sind.
+  await StorageService.instance.syncVisitedPlacesFromCells();
+
+  _visitedCache = await StorageService.instance.getVisitedPlaceIds();
+  final unlocked = await StorageService.instance.getUnlockedAchievementIds();
+  for (final id in _visitedCache) {
+    if (!unlocked.contains('visit_$id')) {
+      await StorageService.instance.unlockAchievement('visit_$id');
     }
   }
+  if (_visitedCache.length >= RegionService.instance.config.places.length) {
+    await StorageService.instance.unlockAchievement('visit_all');
+  }
+}
 
   Future<Set<String>> getVisitedIds() => StorageService.instance.getVisitedPlaceIds();
 

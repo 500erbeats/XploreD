@@ -182,6 +182,17 @@ Future<Set<String>> getVisitedPlaceIds() async {
   return rows.map((r) => r['place_id'] as String).toSet();
 }
 
+/// Trägt alle Orte, in denen mindestens eine erkundete Zelle liegt, als
+/// besucht ein (mit dem Zeitpunkt der ältesten Zelle). Bereits eingetragene
+/// Orte bleiben unberührt.
+Future<void> syncVisitedPlacesFromCells() async {
+  final db = await database;
+  await db.execute('''
+    INSERT OR IGNORE INTO visited_places (place_id, first_visited)
+    SELECT place_id, MIN(first_visited) FROM explored_cells
+    WHERE place_id IS NOT NULL GROUP BY place_id
+  ''');
+}
   // ---------- Erkundete Zellen ----------
 
   Future<bool> addExploredCell(ExploredCell cell) async {
