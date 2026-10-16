@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform, Directory;
-
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -57,6 +57,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   AchievementToastQueue? _toastQueue;
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
+  double? _loadedBucketDeg; // null = Einzelzellen
+  double? _aggRadius;       // Zeichenradius im zusammengefassten Modus
   bool _autoRecenterPaused = false;
   StreamSubscription<AccelerometerEvent>? _orientationSub;
   bool _saverOn = false;
@@ -297,6 +299,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   }
 
   void _onNewCellExplored(ExploredCell cell) {
+    if (_loadedBucketDeg != null) return;
     final loaded = _loadedBounds;
     if (loaded == null) return;
 
@@ -312,32 +315,56 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   }
 
   Future<void> _loadViewportCells() async {
-    final bounds = _mapController.camera.visibleBounds;
-    final latPad = (bounds.north - bounds.south) * 0.5;
-    final lngPad = (bounds.east - bounds.west) * 0.5;
+  final camera = _mapController.camera;
+  final bounds = camera.visibleBounds;
+  final latPad = (bounds.north - bounds.south) * 0.5;
+  final lngPad = (bounds.east - bounds.west) * 0.5;
 
-    final paddedBounds = LatLngBounds(
-      LatLng(bounds.south - latPad, bounds.west - lngPad),
-      LatLng(bounds.north + latPad, bounds.east + lngPad),
-    );
+  final paddedBounds = LatLngBounds(
+    LatLng(bounds.south - latPad, bounds.west - lngPad),
+    LatLng(bounds.north + latPad, bounds.east + lngPad),
+  );
 
-    if (_loadedBounds != null && _loadedBounds!.containsBounds(paddedBounds)) {
-      return;
-    }
-
-    final cells = await StorageService.instance.getCellsInBounds(
-      minLat: paddedBounds.south,
-      maxLat: paddedBounds.north,
-      minLng: paddedBounds.west,
-      maxLng: paddedBounds.east,
-    );
-
-    if (!mounted) return;
-    setState(() {
-      _cells = cells;
-      _loadedBounds = paddedBounds;
-    });
+  // Detailgrad pro ganzer Zoomstufe, damit nicht bei jedem Frame neu
+  // geladen wird. Rasterfeld ~10 px groß (Meter pro Pixel bei ~48° Breite).
+  final level = camera.zoom.floor();
+  double? bucketDeg;
+  double? aggRadius;
+  if (level < 12) {
+    final bucketMeters = 10 * 104750 / math.pow(2, level);
+    bucketDeg = bucketMeters / 111320;
+    aggRadius = bucketMeters * 0.75;
   }
+
+  if (_loadedBounds != null &&
+      _loadedBounds!.containsBounds(paddedBounds) &&
+      _loadedBucketDeg == bucketDeg) {
+    return;
+  }
+
+  final cells = bucketDeg == null
+      ? await StorageService.instance.getCellsInBounds(
+          minLat: paddedBounds.south,
+          maxLat: paddedBounds.north,
+          minLng: paddedBounds.west,
+          maxLng: paddedBounds.east,
+        )
+      : await StorageService.instance.getCellsInBoundsAggregated(
+          minLat: paddedBounds.south,
+          maxLat: paddedBounds.north,
+          minLng: paddedBounds.west,
+          maxLng: paddedBounds.east,
+          bucketDeg: bucketDeg,
+        );
+
+  if (!mounted) return;
+  setState(() {
+    _cells = cells;
+    _loadedBounds = paddedBounds;
+    _loadedBucketDeg = bucketDeg;
+    _aggRadius = aggRadius;
+  });
+}
 
   /// Rückt die Karte nach, sobald der Standort zu nah an den Bildschirmrand
   /// kommt - kein starres Mitziehen, pausiert bei manuellem Scrollen.
@@ -486,8 +513,8 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                     painter: FogOverlayPainter(
                       exploredCells: _cells,
                       camera: _mapController.camera,
-                      urbanRadiusMeters: _urbanRadius,
-                      ruralRadiusMeters: _ruralRadius,
+                      urbanRadiusMeters: math.max(_urbanRadius, _aggRadius ?? 0),
+                      ruralRadiusMeters: math.max(_ruralRadius, _aggRadius ?? 0),
                       fogColor: isDarkTheme
                           ? const Color(0xE6F0F0F5)
                           : const Color(0xCC0A0E1A),

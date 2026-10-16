@@ -235,6 +235,30 @@ Future<void> syncVisitedPlacesFromCells() async {
     return rows.map(ExploredCell.fromMap).toList();
   }
 
+/// Fasst Zellen in Rasterfelder der Größe [bucketDeg] zusammen - für
+/// niedrige Zoomstufen, wo Einzelzellen eh kleiner als ein Pixel wären.
+/// (CAST auf INTEGER rundet Richtung 0, passt für positive Koordinaten.)
+Future<List<ExploredCell>> getCellsInBoundsAggregated({
+  required double minLat,
+  required double maxLat,
+  required double minLng,
+  required double maxLng,
+  required double bucketDeg,
+}) async {
+  final db = await database;
+  final rows = await db.rawQuery('''
+    SELECT MIN(geohash) AS geohash,
+           AVG(center_lat) AS center_lat,
+           AVG(center_lng) AS center_lng,
+           MIN(first_visited) AS first_visited,
+           MAX(place_id) AS place_id
+    FROM explored_cells
+    WHERE center_lat BETWEEN ? AND ? AND center_lng BETWEEN ? AND ?
+    GROUP BY CAST(center_lat / ? AS INTEGER), CAST(center_lng / ? AS INTEGER)
+  ''', [minLat, maxLat, minLng, maxLng, bucketDeg, bucketDeg]);
+  return rows.map(ExploredCell.fromMap).toList();
+}
+
   /// Zählt erkundete Zellen für einen Ort direkt über die gecachte place_id-
 /// Spalte - dank Index praktisch O(log n), kein Bounding-Box-Query und kein
 /// erneuter Punkt-in-Polygon-Test mehr nötig.
