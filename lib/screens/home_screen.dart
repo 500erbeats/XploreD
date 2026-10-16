@@ -60,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   double? _loadedBucketDeg; // null = Einzelzellen
   double? _aggRadius;       // Zeichenradius im zusammengefassten Modus
   bool _autoRecenterPaused = false;
+  bool _followMode = false;
   StreamSubscription<AccelerometerEvent>? _orientationSub;
   bool _saverOn = false;
   bool _saverEnabled = false;
@@ -434,6 +435,28 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     _autoRecenterPaused = false;
     _mapController.move(pos, _mapController.camera.zoom);
   }
+
+void _toggleFollowMode() {
+  if (_followMode) {
+    setState(() => _followMode = false);
+    return;
+  }
+  final pos = _currentPosition;
+  if (pos == null) return;
+  if (_outsideRegion) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Du bist gerade außerhalb von ${RegionService.instance.config.displayName}.',
+        ),
+      ),
+    );
+    return;
+  }
+  setState(() => _followMode = true);
+  _autoRecenterPaused = false;
+  _mapController.move(pos, _mapController.camera.zoom);
+}
 
   @override
   void dispose() {
