@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
+import '../services/boundary_service.dart';
 
 class PrivacyScreen extends StatelessWidget {
   const PrivacyScreen({super.key});
@@ -141,6 +142,8 @@ Future<void> _importData(BuildContext context) async {
       throw const FormatException('Keine gültige XploreD-Datei');
     }
     final result = await StorageService.instance.importAllData(decoded);
+    await _backfillPlaces();
+    if (!context.mounted) return;
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -162,4 +165,18 @@ Future<void> _importData(BuildContext context) async {
       SnackBar(content: Text('Import fehlgeschlagen: $e')),
     );
   }
+}
+  /// Ordnet allen Zellen ohne place_id ihren Ort zu und trägt die Orte
+/// danach als besucht ein.
+Future<void> _backfillPlaces() async {
+  final storage = StorageService.instance;
+  final cells = await storage.getCellsWithoutPlaceId();
+  for (final cell in cells) {
+    final place = BoundaryService.instance
+        .placeContaining(cell.centerLat, cell.centerLng);
+    if (place != null) {
+      await storage.updateCellPlaceId(cell.geohash, place.id);
+    }
+  }
+  await storage.syncVisitedPlacesFromCells();
 }
