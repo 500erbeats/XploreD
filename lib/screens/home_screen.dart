@@ -369,12 +369,19 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
 
   /// Rückt die Karte nach, sobald der Standort zu nah an den Bildschirmrand
   /// kommt - kein starres Mitziehen, pausiert bei manuellem Scrollen.
-  void _recenterIfNearEdge() {
-    if (_autoRecenterPaused) return;
-    final pos = _currentPosition;
-    if (pos == null || _outsideRegion || !mounted) return;
+ void _recenterIfNearEdge() {
+  final pos = _currentPosition;
+  if (pos == null || _outsideRegion || !mounted) return;
 
-    final camera = _mapController.camera;
+  // Follow-Modus: Standort immer exakt in der Bildmitte.
+  if (_followMode) {
+    _mapController.move(pos, _mapController.camera.zoom);
+    return;
+  }
+
+  if (_autoRecenterPaused) return;
+
+  final camera = _mapController.camera;
     final screenPoint = camera.latLngToScreenPoint(pos);
     final size = MediaQuery.sizeOf(context);
 
@@ -392,12 +399,18 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     }
   }
 
-  void _onMapEvent(MapEvent event) {
-    _scheduleViewportLoad();
-    if (event.source != MapEventSource.mapController) {
-      _autoRecenterPaused = true;
-    }
+void _onMapEvent(MapEvent event) {
+  _scheduleViewportLoad();
+  if (event.source != MapEventSource.mapController) {
+    _autoRecenterPaused = true;
   }
+  // Mit dem Finger verschieben beendet den Follow-Modus.
+  if (_followMode &&
+      (event.source == MapEventSource.dragStart ||
+          event.source == MapEventSource.onDrag)) {
+    setState(() => _followMode = false);
+  }
+}
 
   void _showPermissionDeniedDialog() {
     showDialog(
@@ -653,6 +666,17 @@ void _toggleFollowMode() {
                     ),
                   ],
                 ),
+              ),
+            ),
+            Positioned(
+              right: 24,
+              bottom: 100,
+              child: FloatingActionButton.small(
+                heroTag: 'follow',
+                backgroundColor: _followMode ? Colors.blueAccent : null,
+                foregroundColor: _followMode ? Colors.white : null,
+                onPressed: _toggleFollowMode,
+                child: Icon(_followMode ? Icons.navigation : Icons.navigation_outlined),
               ),
             ),
           Positioned(
