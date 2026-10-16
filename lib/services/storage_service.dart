@@ -8,7 +8,13 @@ class QueuedTrackPoint {
   final int id;
   final double lat;
   final double lng;
-  const QueuedTrackPoint({required this.id, required this.lat, required this.lng});
+  final DateTime timestamp;
+  const QueuedTrackPoint({
+    required this.id,
+    required this.lat,
+    required this.lng,
+    required this.timestamp,
+  });
 }
 
 class ImportResult {
@@ -157,12 +163,13 @@ Future<List<QueuedTrackPoint>> getQueuedTrackPoints() async {
   final db = await database;
   final rows = await db.query('location_track', orderBy: 'timestamp ASC');
   return rows
-      .map((r) => QueuedTrackPoint(
-            id: r['id'] as int,
-            lat: r['lat'] as double,
-            lng: r['lng'] as double,
-          ))
-      .toList();
+    .map((r) => QueuedTrackPoint(
+          id: r['id'] as int,
+          lat: r['lat'] as double,
+          lng: r['lng'] as double,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(r['timestamp'] as int),
+        ))
+    .toList();
 }
 
 Future<void> clearTrackPoints(List<int> ids) async {
@@ -280,14 +287,28 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
 
   // ---------- Position / App-State ----------
 
-  Future<void> saveLastPosition(double lat, double lng) async {
-    final db = await database;
-    await db.insert(
-      'app_state',
-      {'key': 'last_position', 'value': '$lat,$lng'},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
+Future<void> saveLastPosition(double lat, double lng, {DateTime? at}) async {
+  final db = await database;
+  final ms = (at ?? DateTime.now()).millisecondsSinceEpoch;
+  await db.insert(
+    'app_state',
+    {'key': 'last_position', 'value': '$lat,$lng,$ms'},
+    conflictAlgorithm: ConflictAlgorithm.replace,
+  );
+}
+
+/// Zeitpunkt der zuletzt gespeicherten Position, null bei Altdaten ohne
+/// Zeitstempel (dann wird nicht verbunden).
+Future<DateTime?> getLastPositionTime() async {
+  final db = await database;
+  final rows = await db
+      .query('app_state', where: 'key = ?', whereArgs: ['last_position']);
+  if (rows.isEmpty) return null;
+  final parts = (rows.first['value'] as String).split(',');
+  if (parts.length < 3) return null;
+  final ms = int.tryParse(parts[2]);
+  return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+}
 
   Future<(double, double)?> getLastPosition() async {
     final db = await database;

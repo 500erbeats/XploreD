@@ -16,6 +16,7 @@ class ExplorationService {
   static const int _geohashPrecision = 7;
   static const double _maxGapMeters = 15000;
   static const double _interpolationStepMeters = 200;
+  static const Duration _maxConnectGap = Duration(minutes: 5);
 
   final _newCellController = StreamController<ExploredCell>.broadcast();
   Stream<ExploredCell> get onNewCellExplored => _newCellController.stream;
@@ -92,32 +93,44 @@ Future<void> _backfillMissingPlaceIds() async {
     if (queued.isEmpty) return;
 
     for (final point in queued) {
-      await recordVisit(point.lat, point.lng);
+      await recordVisit(point.lat, point.lng, at: point.timestamp);
     }
     await StorageService.instance.clearTrackPoints(queued.map((p) => p.id).toList());
   }
 
   /// Zentrale Methode. Außerhalb des Spielgebiets passiert bewusst nichts.
-Future<void> recordVisit(double lat, double lng) async {
+Future<void> recordVisit(double lat, double lng, {DateTime? at}) async {
   if (!isInsideRegion(lat, lng)) return;
 
+  final pointTime = at ?? DateTime.now();
   final last = await StorageService.instance.getLastPosition();
+  final lastTime = await StorageService.instance.getLastPositionTime();
 
-  // Der allererste Punkt nach einem (Neu-)Start verbindet sich NICHT mit
-  // der zuletzt gespeicherten Position aus einer früheren Sitzung - die
-  // App könnte in der Zwischenzeit komplett beendet gewesen sein, dann
-  // wäre die Lücke dazwischen reine Spekulation statt echter Erkundung.
   final skipGapFill = _isFirstPointOfSession;
   _isFirstPointOfSession = false;
 
+  // Nur verbinden, wenn der letzte Punkt zeitlich nah dran liegt. Danach
+  // war die App zu, suspendiert oder ohne GPS, und die Strecke dazwischen
+  // ist unbekannt - dann lieber Nebel statt Luftlinie.
+  final timeGap = lastTime == null ? null : pointTime.difference(lastTime);
+  final canConnect = last != null &&
+      !skipGapFill &&
+      timeGap != null &&
+      !timeGap.isNegative &&
+      timeGap <= _maxConnectGap;
+
+  if (last != null && !canConnect) {
+    debugPrint('Keine Verbindung zum letzten Punkt (Zeitlücke: $timeGap)');
+  }
+
   await _processPoint(lat, lng, isInterpolated: false);
-  if (last != null && !skipGapFill) {
+  if (canConnect) {
     await _fillGap(last.$1, last.$2, lat, lng);
     await _trackDistance(last.$1, last.$2, lat, lng);
   }
 
   await StorageService.instance.recordExplorationDay(DateTime.now());
-  await StorageService.instance.saveLastPosition(lat, lng);
+  await StorageService.instance.saveLastPosition(lat, lng, at: pointTime);
 
   final stats = await getStats();
   await achievements.checkAll(stats);
