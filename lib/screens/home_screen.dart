@@ -25,6 +25,9 @@ import 'onboarding_screen.dart';
 import 'privacy_screen.dart';
 import 'settings_screen.dart';
 import 'stats_screen.dart';
+import 'package:screen_brightness/screen_brightness.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -55,12 +58,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
   bool _autoRecenterPaused = false;
+  StreamSubscription<AccelerometerEvent>? _orientationSub;
+  bool _saverOn = false;
+  bool _saverEnabled = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _applyScreenSaverSetting();
     _bootstrap();
+  }
+
+  void _startOrientationListener() {
+    _orientationSub?.cancel();
+    _orientationSub = accelerometerEventStream(
+      samplingPeriod: SensorInterval.normalInterval,
+    ).listen((e) {
+      // Hysterese: einschalten bei y < -7, ausschalten erst bei y > -4
+      // -> kein Flackern an der Schwelle.
+      // Handy kopfüber (Oberkante zeigt nach unten): y negativ.
+      // Alternativ "Display nach unten auf den Tisch": e.z statt e.y nehmen.
+      final upsideDown = _saverOn ? e.y < -4 : e.y < -7;
+      _setSaver(upsideDown);
+    });
+  }
+
+  Future<void> _setSaver(bool on) async {
+    if (on == _saverOn || !mounted) return;
+    setState(() => _saverOn = on);
+    try {
+      if (on) {
+        await ScreenBrightness().setScreenBrightness(0.0);
+      } else {
+        await ScreenBrightness().resetScreenBrightness();
+      }
+    } catch (e) {
+      debugPrint('Helligkeit konnte nicht gesetzt werden: $e');
+    }
+  }
+
+  Future<void> _applyScreenSaverSetting() async {
+    _saverEnabled = await _settings.isScreenSaverEnabled();
+    if (_saverEnabled) {
+      WakelockPlus.enable();
+      _startOrientationListener();
+    } else {
+      _orientationSub?.cancel();
+      _orientationSub = null;
+      await _setSaver(false);
+      WakelockPlus.disable();
+    }
   }
 
   @override
@@ -70,14 +118,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _exploration.setForeground(true);
-      _handleResumed();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      _exploration.setForeground(false);
-    }
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  if (state == AppLifecycleState.resumed) {
+    _exploration.setForeground(true);
+  if (_saverEnabled) _startOrientationListener();
+    _handleResumed();
+  } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    _exploration.setForeground(false);
+    _orientationSub?.cancel();
+    _orientationSub = null;
+    _setSaver(false);
   }
+}
 
   Future<void> _handleResumed() async {
     if (_loading || !mounted) return;
@@ -360,6 +412,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _viewportDebounce?.cancel();
+    _orientationSub?.cancel();
+    WakelockPlus.disable();
+    ScreenBrightness().resetScreenBrightness();
     if (Platform.isAndroid) {
       FlutterForegroundTask.removeTaskDataCallback(_onBackgroundData);
     } else {
@@ -472,31 +527,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(width: 8),
                 _NavIconButton(
                   icon: Icons.privacy_tip_outlined,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const PrivacyScreen()),
-                  ),
+                  onTap: () async {
+                    final changed = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PrivacyScreen()),
+                    );
+                    if (changed == true) await _handleResumed();
+                  },
                 ),
                 const SizedBox(width: 8),
                 _NavIconButton(
-                  icon: Icons.settings,
-                  onTap: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => SettingsScreen(onTrackingToggle: _handleTrackingToggle),
-                      ),
-                    );
-                    final newTheme = await _settings.getMapTheme();
-                    final newKey = await _settings.getCartoApiKey();
-                    if (mounted) {
-                      setState(() {
-                        _mapTheme = newTheme;
-                        _cartoApiKey = newKey;
-                      });
-                    }
-                  },
-                ),
+                icon: Icons.settings,
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SettingsScreen(onTrackingToggle: _handleTrackingToggle),
+                    ),
+                  );
+                  final newTheme = await _settings.getMapTheme();
+                  final newKey = await _settings.getCartoApiKey();
+                  if (mounted) {
+                    setState(() {
+                      _mapTheme = newTheme;
+                      _cartoApiKey = newKey;
+                    });
+                  }
+                  await _applyScreenSaverSetting();
+                },
+              ),
               ],
             ),
           ),
@@ -553,6 +612,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               heroTag: 'center',
               onPressed: _centerOnMyLocation,
               child: const Icon(Icons.my_location),
+            ),
+          ),
+          if (_saverOn)
+          const Positioned.fill(
+            child: AbsorbPointer(
+              child: ColoredBox(color: Colors.black),
             ),
           ),
         ],

@@ -28,6 +28,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   DateTime? _lastSync;
   TileDownloadProgress? _downloadProgress;
   StreamSubscription<TileDownloadProgress>? _progressSub;
+  bool _screenSaver = false;
+
 
   @override
   void initState() {
@@ -47,34 +49,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final tracking = await _settings.isBackgroundTrackingEnabled();
-    final filter = await _settings.getDistanceFilterMeters();
-    final mapTheme = await _settings.getMapTheme();
-    final cartoKey = await _settings.getCartoApiKey();
-    final lastSync = await _settings.getLastTileSyncAt();
+  final tracking = await _settings.isBackgroundTrackingEnabled();
+  final filter = await _settings.getDistanceFilterMeters();
+  final mapTheme = await _settings.getMapTheme();
+  final cartoKey = await _settings.getCartoApiKey();
+  final lastSync = await _settings.getLastTileSyncAt();
+  final screenSaver = await _settings.isScreenSaverEnabled();
 
-    bool? batteryStatus;
-    if (Platform.isAndroid) {
-      batteryStatus = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _trackingEnabled = tracking;
-      _distanceFilter = filter;
-      _batteryOptimizationIgnored = batteryStatus;
-      _mapTheme = mapTheme;
-      _cartoKeyController.text = cartoKey ?? '';
-      _lastSync = lastSync;
-      _loading = false;
-    });
+  bool? batteryStatus;
+  if (Platform.isAndroid) {
+    batteryStatus = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
   }
+
+  if (!mounted) return;
+  setState(() {
+    _trackingEnabled = tracking;
+    _distanceFilter = filter;
+    _batteryOptimizationIgnored = batteryStatus;
+    _mapTheme = mapTheme;
+    _cartoKeyController.text = cartoKey ?? '';
+    _lastSync = lastSync;
+    _screenSaver = screenSaver;
+    _loading = false;
+  });
+}
 
   Future<void> _onTrackingChanged(bool value) async {
     setState(() => _trackingEnabled = value);
     await _settings.setBackgroundTrackingEnabled(value);
     await widget.onTrackingToggle(value);
   }
+
+  SwitchListTile(
+    title: const Text('Bildschirm anlassen & Sparmodus'),
+    subtitle: const Text(
+      'Display bleibt in der App an. Handy kopfüber halten dunkelt den '
+      'Bildschirm ab, die Erkundung läuft weiter.',
+    ),
+    value: _screenSaver,
+    onChanged: (v) async {
+      setState(() => _screenSaver = v);
+      await _settings.setScreenSaverEnabled(v);
+    },
+  ),
 
   Future<void> _onDistanceFilterChanged(double value) async {
     setState(() => _distanceFilter = value);

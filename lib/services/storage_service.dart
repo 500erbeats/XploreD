@@ -10,6 +10,13 @@ class QueuedTrackPoint {
   final double lng;
   const QueuedTrackPoint({required this.id, required this.lat, required this.lng});
 }
+
+class ImportResult {
+  final int cellsAdded;
+  final int cellsSkipped;
+  const ImportResult({required this.cellsAdded, required this.cellsSkipped});
+}
+
 /// Kapselt die gesamte lokale Persistenz. Offline-first: keinerlei Server-
 /// Abhängigkeit. Schema ist so gehalten, dass eine spätere Cloud-Sync über
 /// ein `synced`-Flag pro Zeile ergänzt werden kann, ohne Kernstruktur zu
@@ -392,6 +399,93 @@ Future<Map<String, dynamic>> exportAllData() async {
     'explorationDays': days,
     'totalDistanceMeters': distance,
   };
+}
+
+/// Importiert eine Datei im Format von exportAllData(). Rein additiv:
+/// vorhandene Daten werden nie überschrieben oder gelöscht.
+/// place_id wird bewusst NICHT übernommen, sondern bleibt NULL und wird
+/// vom bestehenden Backfill (getCellsWithoutPlaceId) neu berechnet.
+Future<ImportResult> importAllData(Map<String, dynamic> data) async {
+  final version = data['schemaVersion'];
+  if (version is! int || version > 1) {
+    throw const FormatException('Unbekanntes Datenformat');
+  }
+  final cells = data['exploredCells'];
+  if (cells is! List) {
+    throw const FormatException('Keine Zellen in der Datei gefunden');
+  }
+
+  final db = await database;
+  final before = await getExploredCellCount();
+  var validCells = 0;
+
+  await db.transaction((txn) async {
+    final batch = txn.batch();
+
+    for (final c in cells) {
+      if (c is! Map) continue;
+      final geohash = c['geohash'];
+      final lat = c['center_lat'];
+      final lng = c['center_lng'];
+      final first = c['first_visited'];
+      if (geohash is! String || lat is! num || lng is! num || first is! int) {
+        continue;
+      }
+      validCells++;
+      batch.insert(
+        'explored_cells',
+        {
+          'geohash': geohash,
+          'center_lat': lat.toDouble(),
+          'center_lng': lng.toDouble(),
+          'first_visited': first,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+
+    final days = data['explorationDays'];
+    if (days is List) {
+      for (final d in days) {
+        if (d is Map && d['day'] is String) {
+          batch.insert('exploration_days', {'day': d['day']},
+              conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+      }
+    }
+
+    final achievements = data['achievements'];
+    if (achievements is List) {
+      for (final a in achievements) {
+        if (a is Map && a['id'] is String && a['unlocked_at'] is int) {
+          batch.insert(
+            'achievements',
+            {'id': a['id'], 'unlocked_at': a['unlocked_at']},
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        }
+      }
+    }
+
+    await batch.commit(noResult: true);
+  });
+
+  // Gesamtstrecke: den größeren Wert behalten (kein Aufaddieren, sonst
+  // würde ein Re-Import auf demselben Gerät die Strecke verdoppeln).
+  final importedDistance = data['totalDistanceMeters'];
+  if (importedDistance is num) {
+    final current = await getTotalDistanceMeters();
+    if (importedDistance > current) {
+      await db.insert(
+        'app_state',
+        {'key': 'total_distance_m', 'value': '${importedDistance.toDouble()}'},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  final added = await getExploredCellCount() - before;
+  return ImportResult(cellsAdded: added, cellsSkipped: validCells - added);
 }
 
   // ---------- Datenschutz ----------

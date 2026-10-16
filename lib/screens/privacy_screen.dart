@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:file_picker/file_picker.dart';
 
 class PrivacyScreen extends StatelessWidget {
   const PrivacyScreen({super.key});
@@ -81,6 +82,12 @@ class PrivacyScreen extends StatelessWidget {
               label: const Text('Daten exportieren'),
             ),
             const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => _importData(context),
+              icon: const Icon(Icons.file_download_outlined),
+              label: const Text('Daten importieren'),
+            ),
+            const SizedBox(height: 12),
             FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: Colors.red[700]),
             onPressed: () => _confirmAndDelete(context),
@@ -118,4 +125,41 @@ Future<void> _exportData(BuildContext context) async {
   await SharePlus.instance.share(
     ShareParams(files: [XFile(file.path)], text: 'XploreD Datensicherung'),
   );
+}
+
+Future<void> _importData(BuildContext context) async {
+  final picked = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['json'],
+  );
+  final path = picked?.files.single.path;
+  if (path == null) return;
+
+  try {
+    final decoded = jsonDecode(await File(path).readAsString());
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Keine gültige XploreD-Datei');
+    }
+    final result = await StorageService.instance.importAllData(decoded);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${result.cellsAdded} Zellen importiert, '
+          '${result.cellsSkipped} waren schon vorhanden.',
+        ),
+      ),
+    );
+    Navigator.pop(context, true); // Home lädt danach neu
+  } on FormatException catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Import fehlgeschlagen: ${e.message}')),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Import fehlgeschlagen: $e')),
+    );
+  }
 }
