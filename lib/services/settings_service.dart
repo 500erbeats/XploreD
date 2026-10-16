@@ -82,15 +82,11 @@ class SettingsService {
     return StorageService.instance.setSetting(_keyPlaceIdBackfillDone, '$done');
   }
 
-  static const _kScreenSaver = 'screen_saver_enabled';
-
   Future<bool> isScreenSaverEnabled() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_kScreenSaver) ?? false;
-  }
+  final v = await StorageService.instance.getSetting('screen_saver_enabled');
+  return v == 'true';
+}
 
-  Future<void> setScreenSaverEnabled(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kScreenSaver, value);
-  }
+Future<void> setScreenSaverEnabled(bool value) =>
+    StorageService.instance.setSetting('screen_saver_enabled', value.toString());
 }

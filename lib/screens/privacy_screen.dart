@@ -128,15 +128,15 @@ Future<void> _exportData(BuildContext context) async {
 }
 
 Future<void> _importData(BuildContext context) async {
-  final picked = await FilePicker.platform.pickFiles(
+  final picked = await FilePicker.pickFile(
     type: FileType.custom,
     allowedExtensions: ['json'],
   );
-  final path = picked?.files.single.path;
-  if (path == null) return;
+  if (picked == null) return;
 
   try {
-    final decoded = jsonDecode(await File(path).readAsString());
+    final bytes = await picked.readAsBytes();
+    final decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Keine gültige XploreD-Datei');
     }

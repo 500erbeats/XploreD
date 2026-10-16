@@ -80,19 +80,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await widget.onTrackingToggle(value);
   }
 
-  SwitchListTile(
-    title: const Text('Bildschirm anlassen & Sparmodus'),
-    subtitle: const Text(
-      'Display bleibt in der App an. Handy kopfüber halten dunkelt den '
-      'Bildschirm ab, die Erkundung läuft weiter.',
-    ),
-    value: _screenSaver,
-    onChanged: (v) async {
-      setState(() => _screenSaver = v);
-      await _settings.setScreenSaverEnabled(v);
-    },
-  ),
-
   Future<void> _onDistanceFilterChanged(double value) async {
     setState(() => _distanceFilter = value);
     await _settings.setDistanceFilterMeters(value);
@@ -194,6 +181,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: _onTrackingChanged,
           ),
           const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Bildschirm anlassen & Sparmodus'),
+            subtitle: const Text(
+              'Display bleibt in der App an. Handy kopfüber halten dunkelt den '
+              'Bildschirm ab, die Erkundung läuft weiter.',
+            ),
+            value: _screenSaver,
+            onChanged: (v) async {
+              setState(() => _screenSaver = v);
+              await _settings.setScreenSaverEnabled(v);
+            },
+          ),
           _sliderTile(
             title: 'GPS-Update-Distanz',
             subtitle:
