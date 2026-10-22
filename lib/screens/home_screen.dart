@@ -50,6 +50,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _mapTheme = 'light';
   String? _cartoApiKey;
 
+  static const int _detailMinZoom = 14;   // ab hier Einzelzellen
+  static const double _cellMeters = 150;  // Zellgröße (Geohash 7)
   final double _urbanRadius = 100;
   final double _ruralRadius = 300;
 
@@ -328,14 +330,17 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
 
   // Detailgrad pro ganzer Zoomstufe, damit nicht bei jedem Frame neu
   // geladen wird. Rasterfeld ~10 px groß (Meter pro Pixel bei ~48° Breite).
-  final level = camera.zoom.floor();
-  double? bucketDeg;
-  double? aggRadius;
-  if (level < 12) {
-    final bucketMeters = 10 * 104750 / math.pow(2, level);
-    bucketDeg = bucketMeters / 111320;
-    aggRadius = bucketMeters * 0.75;
-  }
+final level = camera.zoom.floor();
+double? bucketDeg;
+double? aggRadius;
+if (level < _detailMinZoom) {
+  final metersPerPixel = 104750 / math.pow(2, level);
+  // Rasterfeld: mindestens 2 Zellen breit, mit jedem Rauszoomen größer
+  // (~12 Pixel auf dem Bildschirm).
+  final bucketMeters = math.max(12 * metersPerPixel, 2 * _cellMeters);
+  bucketDeg = bucketMeters / 111320;
+  aggRadius = bucketMeters * 0.75;
+}
 
   if (_loadedBounds != null &&
       _loadedBounds!.containsBounds(paddedBounds) &&
