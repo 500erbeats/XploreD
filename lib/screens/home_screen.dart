@@ -493,25 +493,37 @@ void _onMapEvent(MapEvent event) {
   }
 
   Future<void> _showAllExplored() async {
-  final b = await StorageService.instance.getExploredBounds();
-  if (!mounted) return;
-  if (b == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Noch nichts erkundet.')),
-    );
-    return;
+    try {
+      final b = await StorageService.instance.getExploredBounds();
+      if (!mounted) return;
+      if (b == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Noch nichts erkundet.')),
+        );
+        return;
+      }
+      final (south, north, west, east) = b;
+      debugPrint('Alles anzeigen: S$south N$north W$west O$east');
+
+      final fitted = CameraFit.bounds(
+        bounds: LatLngBounds(LatLng(south, west), LatLng(north, east)),
+        padding: const EdgeInsets.all(48),
+        maxZoom: 16,
+      ).fit(_mapController.camera);
+      debugPrint('Ziel: ${fitted.center}, Zoom ${fitted.zoom}');
+
+      setState(() => _followMode = false);
+      _autoRecenterPaused = true;
+      _mapController.move(fitted.center, fitted.zoom);
+    } catch (e, st) {
+      debugPrint('Alles anzeigen fehlgeschlagen: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Konnte nicht zoomen: $e')),
+        );
+      }
+    }
   }
-  final (south, north, west, east) = b;
-  setState(() => _followMode = false);
-  _autoRecenterPaused = true;
-  _mapController.fitCamera(
-    CameraFit.bounds(
-      bounds: LatLngBounds(LatLng(south, west), LatLng(north, east)),
-      padding: const EdgeInsets.all(48),
-      maxZoom: 16,
-    ),
-  );
-}
 
 Future<void> _openPlaces() async {
   final placeId = await Navigator.push<String>(
@@ -801,65 +813,42 @@ void _toggleFollowMode() {
               ),
             ),
             Positioned(
-              right: 24,
-              bottom: 100,
-              child: FloatingActionButton.small(
-                heroTag: 'follow',
-                backgroundColor: _followMode ? Colors.blueAccent : null,
-                foregroundColor: _followMode ? Colors.white : null,
-                onPressed: _toggleFollowMode,
-                child: Icon(_followMode ? Icons.navigation : Icons.navigation_outlined),
-              ),
-            ),
-            Positioned(
-              right: 24,
-              bottom: 148,
-              child: FloatingActionButton.small(
-                heroTag: 'fit-all',
-                tooltip: 'Alles Erkundete anzeigen',
-                onPressed: _showAllExplored,
-                child: const Icon(Icons.zoom_out_map),
-              ),
-            ),
-            Positioned(
-              right: 24,
-              bottom: 196,
-              child: FloatingActionButton.small(
-                heroTag: 'places',
-                tooltip: 'Orte',
-                onPressed: _openPlaces,
-                child: const Icon(Icons.format_list_bulleted),
-              ),
-            ),
-            if (_highlightRings.isNotEmpty)
-              Positioned(
-                left: 16,
-                right: 88,
-                bottom: 96,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: InputChip(
-                    backgroundColor: Colors.black.withValues(alpha: 0.75),
-                    labelStyle: const TextStyle(color: Colors.white),
-                    deleteIconColor: Colors.white,
-                    avatar: const Icon(Icons.border_outer, size: 18, color: Colors.orangeAccent),
-                    label: Text('Ortsgrenze: $_highlightPlaceName'),
-                    onDeleted: () => setState(() {
-                      _highlightRings = const [];
-                      _highlightPlaceName = null;
-                    }),
+              right: 16,
+              bottom: 32,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FloatingActionButton.small(
+                    heroTag: 'places',
+                    tooltip: 'Orte',
+                    onPressed: _openPlaces,
+                    child: const Icon(Icons.format_list_bulleted),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  FloatingActionButton.small(
+                    heroTag: 'fit-all',
+                    tooltip: 'Alles Erkundete anzeigen',
+                    onPressed: _showAllExplored,
+                    child: const Icon(Icons.zoom_out_map),
+                  ),
+                  const SizedBox(height: 12),
+                  FloatingActionButton.small(
+                    heroTag: 'follow',
+                    backgroundColor: _followMode ? Colors.blueAccent : null,
+                    foregroundColor: _followMode ? Colors.white : null,
+                    onPressed: _toggleFollowMode,
+                    child: Icon(_followMode ? Icons.navigation : Icons.navigation_outlined),
+                  ),
+                  const SizedBox(height: 16),
+                  FloatingActionButton(
+                    heroTag: 'center',
+                    onPressed: _centerOnMyLocation,
+                    child: const Icon(Icons.my_location),
+                  ),
+                ],
               ),
-          Positioned(
-            right: 16,
-            bottom: 32,
-            child: FloatingActionButton(
-              heroTag: 'center',
-              onPressed: _centerOnMyLocation,
-              child: const Icon(Icons.my_location),
             ),
-          ),
           if (_saverOn)
           const Positioned.fill(
             child: AbsorbPointer(
@@ -939,7 +928,7 @@ class _StatsBadge extends StatelessWidget {
                 ),
               ],
             ),
-            if (todayAreaKm2 > 0)
+            if (true) // (todayAreaKm2 > 0)
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
