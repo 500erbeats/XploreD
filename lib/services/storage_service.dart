@@ -303,24 +303,7 @@ Future<int> getExploredCellCountSince(DateTime since) async {
   return Sqflite.firstIntValue(result) ?? 0;
 }
 
-Future<(double, double, double, double)?> getExploredBounds() async {
-  final db = await database;
-  final rows = await db.rawQuery('''
-    SELECT MIN(center_lat) AS s, MAX(center_lat) AS n,
-           MIN(center_lng) AS w, MAX(center_lng) AS e
-    FROM explored_cells
-  ''');
-  final r = rows.first;
-  if (r['s'] == null) return null;
-  return (
-    r['s'] as double,
-    r['n'] as double,
-    r['w'] as double,
-    r['e'] as double,
-  );
-}
-
-  // ---------- Position / App-State ----------
+// ---------- Position / App-State ----------
 
 Future<void> saveLastPosition(double lat, double lng, {DateTime? at}) async {
   final db = await database;

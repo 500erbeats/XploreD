@@ -492,39 +492,6 @@ void _onMapEvent(MapEvent event) {
     _animated.animateTo(dest: pos);
   }
 
-  Future<void> _showAllExplored() async {
-    try {
-      final b = await StorageService.instance.getExploredBounds();
-      if (!mounted) return;
-      if (b == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Noch nichts erkundet.')),
-        );
-        return;
-      }
-      final (south, north, west, east) = b;
-      debugPrint('Alles anzeigen: S$south N$north W$west O$east');
-
-      final fitted = CameraFit.bounds(
-        bounds: LatLngBounds(LatLng(south, west), LatLng(north, east)),
-        padding: const EdgeInsets.all(48),
-        maxZoom: 16,
-      ).fit(_mapController.camera);
-      debugPrint('Ziel: ${fitted.center}, Zoom ${fitted.zoom}');
-
-      setState(() => _followMode = false);
-      _autoRecenterPaused = true;
-      _mapController.move(fitted.center, fitted.zoom);
-    } catch (e, st) {
-      debugPrint('Alles anzeigen fehlgeschlagen: $e\n$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Konnte nicht zoomen: $e')),
-        );
-      }
-    }
-  }
-
 Future<void> _openPlaces() async {
   final placeId = await Navigator.push<String>(
     context,
@@ -815,11 +782,13 @@ void _toggleFollowMode() {
             if (_highlightRings.isNotEmpty)
             Positioned(
               left: 16,
-              right: 88,
-              bottom: 96,
+              right: 80,
+              bottom: 104,
+              height: 40,
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: InputChip(
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   backgroundColor: Colors.black.withValues(alpha: 0.75),
                   labelStyle: const TextStyle(color: Colors.white),
                   deleteIconColor: Colors.white,
@@ -844,13 +813,6 @@ void _toggleFollowMode() {
                     tooltip: 'Orte',
                     onPressed: _openPlaces,
                     child: const Icon(Icons.format_list_bulleted),
-                  ),
-                  const SizedBox(height: 12),
-                  FloatingActionButton.small(
-                    heroTag: 'fit-all',
-                    tooltip: 'Alles Erkundete anzeigen',
-                    onPressed: _showAllExplored,
-                    child: const Icon(Icons.zoom_out_map),
                   ),
                   const SizedBox(height: 12),
                   FloatingActionButton.small(
