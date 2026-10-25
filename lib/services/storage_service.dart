@@ -285,6 +285,41 @@ Future<int> getExploredCellCountForPlace(String placeId) async {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
+Future<Map<String, int>> getExploredCellCountsByPlace() async {
+  final db = await database;
+  final rows = await db.rawQuery(
+    'SELECT place_id, COUNT(*) AS c FROM explored_cells '
+    'WHERE place_id IS NOT NULL GROUP BY place_id',
+  );
+  return {for (final r in rows) r['place_id'] as String: r['c'] as int};
+}
+
+Future<int> getExploredCellCountSince(DateTime since) async {
+  final db = await database;
+  final result = await db.rawQuery(
+    'SELECT COUNT(*) AS c FROM explored_cells WHERE first_visited >= ?',
+    [since.millisecondsSinceEpoch],
+  );
+  return Sqflite.firstIntValue(result) ?? 0;
+}
+
+Future<(double, double, double, double)?> getExploredBounds() async {
+  final db = await database;
+  final rows = await db.rawQuery('''
+    SELECT MIN(center_lat) AS s, MAX(center_lat) AS n,
+           MIN(center_lng) AS w, MAX(center_lng) AS e
+    FROM explored_cells
+  ''');
+  final r = rows.first;
+  if (r['s'] == null) return null;
+  return (
+    r['s'] as double,
+    r['n'] as double,
+    r['w'] as double,
+    r['e'] as double,
+  );
+}
+
   // ---------- Position / App-State ----------
 
 Future<void> saveLastPosition(double lat, double lng, {DateTime? at}) async {

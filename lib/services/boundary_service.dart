@@ -140,6 +140,9 @@ class BoundaryService {
     return total;
   }
 
+  List<List<LatLng>> ringsFor(String placeId) => _boundaries[placeId] ?? const [];
+  LatLngBounds? boundsFor(String placeId) => _bounds[placeId];
+
   double _ringAreaKm2(List<LatLng> ring) {
     if (ring.length < 3) return 0;
 

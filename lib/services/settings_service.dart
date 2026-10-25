@@ -89,4 +89,14 @@ class SettingsService {
 
 Future<void> setScreenSaverEnabled(bool value) =>
     StorageService.instance.setSetting('screen_saver_enabled', value.toString());
+
+
+Future<double?> getMapZoom() async {
+  final v = await StorageService.instance.getSetting('map_zoom');
+  return v == null ? null : double.tryParse(v);
+}
+
+Future<void> setMapZoom(double zoom) =>
+    StorageService.instance.setSetting('map_zoom', zoom.toStringAsFixed(2));
+    
 }

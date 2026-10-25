@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http_cache_file_store/http_cache_file_store.dart';
 import 'package:flutter_map_cache/flutter_map_cache.dart';
+import 'package:flutter_map_animations/flutter_map_animations.dart';
 
 import '../models/explored_cell.dart';
 import '../models/place.dart';
@@ -28,6 +29,7 @@ import 'stats_screen.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'places_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -36,8 +38,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   final _mapController = MapController();
+  late final AnimatedMapController _animated = AnimatedMapController(
+    vsync: this,
+    mapController: _mapController,
+  );
   final _exploration = ExplorationService();
   final _settings = SettingsService();
 
@@ -60,8 +67,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
   StreamSubscription<ExploredCell>? _cellSub;
-StreamSubscription? _positionSub;
-double? _activeDistanceFilter;
+  StreamSubscription? _positionSub;
+  double? _activeDistanceFilter;
   double? _loadedBucketDeg; // null = Einzelzellen
   double? _aggRadius;       // Zeichenradius im zusammengefassten Modus
   bool _autoRecenterPaused = false;
@@ -69,6 +76,13 @@ double? _activeDistanceFilter;
   StreamSubscription<AccelerometerEvent>? _orientationSub;
   bool _saverOn = false;
   bool _saverEnabled = false;
+  double _initialZoom = 13;
+  double? _lastSavedZoom;
+  Timer? _zoomSaveTimer;
+  List<List<LatLng>> _highlightRings = const [];
+  String? _highlightPlaceName;
+  int _todayCount = 0;
+  Timer? _todayDebounce;
 
   @override
   void initState() {
@@ -97,9 +111,9 @@ double? _activeDistanceFilter;
     setState(() => _saverOn = on);
     try {
       if (on) {
-        await ScreenBrightness().setScreenBrightness(0.0);
+        await ScreenBrightness().setApplicationScreenBrightness(0.0);
       } else {
-        await ScreenBrightness().resetScreenBrightness();
+        await ScreenBrightness().resetApplicationScreenBrightness();
       }
     } catch (e) {
       debugPrint('Helligkeit konnte nicht gesetzt werden: $e');
@@ -149,6 +163,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     } catch (e) {
       debugPrint('Refresh nach Resume übersprungen: $e');
     }
+    await _refreshTodayCount();
     if (mounted) setState(() {});
   }
 
@@ -184,10 +199,12 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     }
     _mapTheme = await _settings.getMapTheme();
     _cartoApiKey = await _settings.getCartoApiKey();
+    _initialZoom = ((await _settings.getMapZoom()) ?? 13).clamp(9.0, 19.0).toDouble();
+    _lastSavedZoom = _initialZoom;
 
     final onboardingDone = await _settings.isOnboardingCompleted();
     if (!onboardingDone) {
-      setState(() => _loading = false);
+      await _refreshTodayCount();
       return;
     }
 
@@ -297,6 +314,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
         });
         _recenterIfNearEdge();
       }
+      _scheduleTodayRefresh();
       _loadViewportCells();
       _checkAchievementsAfterBackgroundUpdate();
     }
@@ -308,6 +326,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   }
 
   void _onNewCellExplored(ExploredCell cell) {
+    _scheduleTodayRefresh();
     if (_loadedBucketDeg != null) return;
     final loaded = _loadedBounds;
     if (loaded == null) return;
@@ -385,10 +404,15 @@ if (level < _detailMinZoom) {
   if (pos == null || _outsideRegion || !mounted) return;
 
   // Follow-Modus: Standort immer exakt in der Bildmitte.
-  if (_followMode) {
-    _mapController.move(pos, _mapController.camera.zoom);
-    return;
-  }
+// Follow-Modus:
+if (_followMode) {
+  _animated.animateTo(
+    dest: pos,
+    duration: const Duration(milliseconds: 900),
+    curve: Curves.linear,
+  );
+  return;
+}
 
   if (_autoRecenterPaused) return;
 
@@ -406,7 +430,7 @@ if (level < _detailMinZoom) {
         screenPoint.y > size.height - marginY;
 
     if (nearEdge) {
-      _mapController.move(pos, camera.zoom);
+      _animated.animateTo(dest: pos);
     }
   }
 
@@ -421,6 +445,14 @@ void _onMapEvent(MapEvent event) {
           event.source == MapEventSource.onDrag)) {
     setState(() => _followMode = false);
   }
+  _zoomSaveTimer?.cancel();
+  _zoomSaveTimer = Timer(const Duration(seconds: 1), () {
+    final zoom = _mapController.camera.zoom;
+    if (zoom != _lastSavedZoom) {
+      _lastSavedZoom = zoom;
+      _settings.setMapZoom(zoom);
+    }
+  });
 }
 
   void _showPermissionDeniedDialog() {
@@ -457,8 +489,76 @@ void _onMapEvent(MapEvent event) {
       return;
     }
     _autoRecenterPaused = false;
-    _mapController.move(pos, _mapController.camera.zoom);
+    _animated.animateTo(dest: pos);
   }
+
+  Future<void> _showAllExplored() async {
+  final b = await StorageService.instance.getExploredBounds();
+  if (!mounted) return;
+  if (b == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Noch nichts erkundet.')),
+    );
+    return;
+  }
+  final (south, north, west, east) = b;
+  setState(() => _followMode = false);
+  _autoRecenterPaused = true;
+  _mapController.fitCamera(
+    CameraFit.bounds(
+      bounds: LatLngBounds(LatLng(south, west), LatLng(north, east)),
+      padding: const EdgeInsets.all(48),
+      maxZoom: 16,
+    ),
+  );
+}
+
+Future<void> _openPlaces() async {
+  final placeId = await Navigator.push<String>(
+    context,
+    MaterialPageRoute(builder: (_) => const PlacesScreen()),
+  );
+  if (placeId != null) _showPlace(placeId);
+}
+
+void _showPlace(String placeId) {
+  final bounds = BoundaryService.instance.boundsFor(placeId);
+  final rings = BoundaryService.instance.ringsFor(placeId);
+  if (bounds == null || rings.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Für diesen Ort liegen keine Grenzdaten vor.')),
+    );
+    return;
+  }
+  final name = RegionService.instance.config.places
+      .firstWhere((p) => p.id == placeId)
+      .name;
+  setState(() {
+    _followMode = false;
+    _highlightRings = rings;
+    _highlightPlaceName = name;
+  });
+  _autoRecenterPaused = true;
+  _mapController.fitCamera(
+    CameraFit.bounds(
+      bounds: bounds,
+      padding: const EdgeInsets.all(48),
+      maxZoom: 15,
+    ),
+  );
+}
+
+Future<void> _refreshTodayCount() async {
+  final now = DateTime.now();
+  final count = await StorageService.instance
+      .getExploredCellCountSince(DateTime(now.year, now.month, now.day));
+  if (mounted && count != _todayCount) setState(() => _todayCount = count);
+}
+
+void _scheduleTodayRefresh() {
+  _todayDebounce?.cancel();
+  _todayDebounce = Timer(const Duration(milliseconds: 500), _refreshTodayCount);
+}
 
 void _toggleFollowMode() {
   if (_followMode) {
@@ -489,14 +589,17 @@ void _toggleFollowMode() {
     _cellSub?.cancel();
     _positionSub?.cancel();
     _orientationSub?.cancel();
+    _todayDebounce?.cancel();
     WakelockPlus.disable();
-    ScreenBrightness().resetScreenBrightness();
+    ScreenBrightness().resetApplicationScreenBrightness();
     if (Platform.isAndroid) {
       FlutterForegroundTask.removeTaskDataCallback(_onBackgroundData);
     } else {
       _exploration.stopListening();
     }
     _exploration.dispose();
+    _zoomSaveTimer?.cancel();
+    _animated.dispose();
     super.dispose();
   }
 
@@ -505,7 +608,6 @@ void _toggleFollowMode() {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
     return FutureBuilder<bool>(
       future: _settings.isOnboardingCompleted(),
       builder: (context, snapshot) {
@@ -535,7 +637,7 @@ void _toggleFollowMode() {
             mapController: _mapController,
             options: MapOptions(
               initialCenter: startCenter,
-              initialZoom: 13,
+              initialZoom: _initialZoom,
               minZoom: 9,
               maxZoom: 19,
               cameraConstraint: CameraConstraint.contain(bounds: region.bounds),
@@ -571,6 +673,17 @@ void _toggleFollowMode() {
                   ),
                 ),
               ),
+              if (_highlightRings.isNotEmpty)
+              PolygonLayer(
+                polygons: [
+                  for (final ring in _highlightRings)
+                    Polygon(
+                      points: ring,
+                      borderColor: Colors.orangeAccent,
+                      borderStrokeWidth: 3,
+                    ),
+                ],
+              ),
               if (_currentPosition != null && !_outsideRegion)
                 MarkerLayer(markers: [
                   Marker(
@@ -585,6 +698,7 @@ void _toggleFollowMode() {
           _StatsBadge(
             exploredCount: _exploration.totalExploredCount,
             areaKm2: _exploration.estimatedExploredAreaKm2,
+            todayAreaKm2: _todayCount * 0.15 * 0.15,
             tracking: _tracking,
             placeName: _currentPlaceName,
           ),
@@ -697,6 +811,46 @@ void _toggleFollowMode() {
                 child: Icon(_followMode ? Icons.navigation : Icons.navigation_outlined),
               ),
             ),
+            Positioned(
+              right: 24,
+              bottom: 148,
+              child: FloatingActionButton.small(
+                heroTag: 'fit-all',
+                tooltip: 'Alles Erkundete anzeigen',
+                onPressed: _showAllExplored,
+                child: const Icon(Icons.zoom_out_map),
+              ),
+            ),
+            Positioned(
+              right: 24,
+              bottom: 196,
+              child: FloatingActionButton.small(
+                heroTag: 'places',
+                tooltip: 'Orte',
+                onPressed: _openPlaces,
+                child: const Icon(Icons.format_list_bulleted),
+              ),
+            ),
+            if (_highlightRings.isNotEmpty)
+              Positioned(
+                left: 16,
+                right: 88,
+                bottom: 96,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: InputChip(
+                    backgroundColor: Colors.black.withValues(alpha: 0.75),
+                    labelStyle: const TextStyle(color: Colors.white),
+                    deleteIconColor: Colors.white,
+                    avatar: const Icon(Icons.border_outer, size: 18, color: Colors.orangeAccent),
+                    label: Text('Ortsgrenze: $_highlightPlaceName'),
+                    onDeleted: () => setState(() {
+                      _highlightRings = const [];
+                      _highlightPlaceName = null;
+                    }),
+                  ),
+                ),
+              ),
           Positioned(
             right: 16,
             bottom: 32,
@@ -745,12 +899,14 @@ class _StatsBadge extends StatelessWidget {
   final double areaKm2;
   final bool tracking;
   final String? placeName;
+  final double todayAreaKm2;
 
   const _StatsBadge({
     required this.exploredCount,
     required this.areaKm2,
     required this.tracking,
     this.placeName,
+    required this.todayAreaKm2,
   });
 
   @override
@@ -782,6 +938,14 @@ class _StatsBadge extends StatelessWidget {
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                 ),
               ],
+            ),
+            if (todayAreaKm2 > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '+${todayAreaKm2.toStringAsFixed(2)} km² heute',
+                style: const TextStyle(color: Colors.greenAccent, fontSize: 11),
+              ),
             ),
             if (placeName != null)
               Padding(
