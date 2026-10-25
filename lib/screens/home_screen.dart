@@ -204,7 +204,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
 
     final onboardingDone = await _settings.isOnboardingCompleted();
     if (!onboardingDone) {
-      await _refreshTodayCount();
+      setState(() => _loading = false);
       return;
     }
 
@@ -218,6 +218,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
       await _startTracking();
     }
 
+    await _refreshTodayCount();
     setState(() => _loading = false);
   }
 
@@ -783,7 +784,11 @@ void _toggleFollowMode() {
             Positioned(
               right: 16,
               bottom: 32,
-              child: Column(
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -840,6 +845,7 @@ void _toggleFollowMode() {
                 ],
               ),
             ),
+          ),
           if (_saverOn)
           const Positioned.fill(
             child: AbsorbPointer(
