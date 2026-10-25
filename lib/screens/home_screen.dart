@@ -779,28 +779,7 @@ void _toggleFollowMode() {
                 ),
               ),
             ),
-            if (_highlightRings.isNotEmpty)
-            Positioned(
-              left: 16,
-              right: 80,
-              bottom: 104,
-              height: 40,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: InputChip(
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  backgroundColor: Colors.black.withValues(alpha: 0.75),
-                  labelStyle: const TextStyle(color: Colors.white),
-                  deleteIconColor: Colors.white,
-                  avatar: const Icon(Icons.border_outer, size: 18, color: Colors.orangeAccent),
-                  label: Text('Ortsgrenze: $_highlightPlaceName'),
-                  onDeleted: () => setState(() {
-                    _highlightRings = const [];
-                    _highlightPlaceName = null;
-                  }),
-                ),
-              ),
-            ),
+            
             Positioned(
               right: 16,
               bottom: 32,
@@ -815,12 +794,42 @@ void _toggleFollowMode() {
                     child: const Icon(Icons.format_list_bulleted),
                   ),
                   const SizedBox(height: 12),
-                  FloatingActionButton.small(
-                    heroTag: 'follow',
-                    backgroundColor: _followMode ? Colors.blueAccent : null,
-                    foregroundColor: _followMode ? Colors.white : null,
-                    onPressed: _toggleFollowMode,
-                    child: Icon(_followMode ? Icons.navigation : Icons.navigation_outlined),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 32),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (_highlightRings.isNotEmpty)
+                          Flexible(
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: InputChip(
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                backgroundColor: Colors.black.withValues(alpha: 0.75),
+                                labelStyle: const TextStyle(color: Colors.white),
+                                deleteIconColor: Colors.white,
+                                avatar: const Icon(Icons.border_outer, size: 18, color: Colors.orangeAccent),
+                                label: Text(
+                                  'Ortsgrenze: $_highlightPlaceName',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                onDeleted: () => setState(() {
+                                  _highlightRings = const [];
+                                  _highlightPlaceName = null;
+                                }),
+                              ),
+                            ),
+                          ),
+                        FloatingActionButton.small(
+                          heroTag: 'follow',
+                          backgroundColor: _followMode ? Colors.blueAccent : null,
+                          foregroundColor: _followMode ? Colors.white : null,
+                          onPressed: _toggleFollowMode,
+                          child: Icon(_followMode ? Icons.navigation : Icons.navigation_outlined),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 16),
                   FloatingActionButton(
