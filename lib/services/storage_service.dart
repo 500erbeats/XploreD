@@ -427,6 +427,22 @@ Future<void> updateCellPlaceId(String geohash, String? placeId) async {
   );
 }
 
+Future<void> updateCellPlaceIds(Map<String, String?> placeIdsByGeohash) async {
+  final db = await database;
+  await db.transaction((txn) async {
+    final batch = txn.batch();
+    placeIdsByGeohash.forEach((geohash, placeId) {
+      batch.update(
+        'explored_cells',
+        {'place_id': placeId},
+        where: 'geohash = ?',
+        whereArgs: [geohash],
+      );
+    });
+    await batch.commit(noResult: true);
+  });
+}
+
 Future<Map<String, dynamic>> exportAllData() async {
   final db = await database;
   final cells = await db.query('explored_cells');

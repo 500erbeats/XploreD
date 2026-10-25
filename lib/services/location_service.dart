@@ -67,11 +67,6 @@ class LocationService {
   /// [distanceFilterMeters] kommt aus den Nutzer-Einstellungen (Akku- vs.
   /// Genauigkeits-Trade-off).
   ///
-  /// Offener Punkt: aktuell übergibt nur der iOS-Pfad in
-  /// ExplorationService.startListening() diesen Parameter nicht explizit
-  /// (nutzt also den Default 50m) - der Android-Hintergrundpfad läuft über
-  /// einen eigenen Geolocator-Stream im Isolate (background_task_handler.dart)
-  /// und liest den Wert bislang ebenfalls nicht aus den Settings.
   Future<void>? _processingChain;
 
 void startTracking({

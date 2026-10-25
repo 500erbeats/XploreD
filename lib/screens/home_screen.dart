@@ -59,6 +59,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   AchievementToastQueue? _toastQueue;
   Timer? _viewportDebounce;
   LatLngBounds? _loadedBounds;
+  StreamSubscription<ExploredCell>? _cellSub;
+StreamSubscription? _positionSub;
+double? _activeDistanceFilter;
   double? _loadedBucketDeg; // null = Einzelzellen
   double? _aggRadius;       // Zeichenradius im zusammengefassten Modus
   bool _autoRecenterPaused = false;
@@ -216,30 +219,33 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   }
 
   Future<void> _startTracking() async {
-    final distanceFilter = await _settings.getDistanceFilterMeters();
+  final distanceFilter = await _settings.getDistanceFilterMeters();
+  _activeDistanceFilter = distanceFilter;
 
-    if (Platform.isAndroid) {
-      await _startAndroidForegroundTracking(distanceFilter);
-    } else {
-      _exploration.startListening();
-    }
-
-    _exploration.onNewCellExplored.listen(_onNewCellExplored);
-
-    LocationService.instance.positionStream.listen((position) {
-      if (!mounted) return;
-      final lat = position.latitude;
-      final lng = position.longitude;
-      setState(() {
-        _currentPosition = LatLng(lat, lng);
-        _outsideRegion = !isInsideRegion(lat, lng);
-        _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
-      });
-      _recenterIfNearEdge();
-    });
-
-    setState(() => _tracking = true);
+  if (Platform.isAndroid) {
+    await _startAndroidForegroundTracking(distanceFilter);
+  } else {
+    _exploration.startListening(distanceFilterMeters: distanceFilter);
   }
+
+  _cellSub?.cancel();
+  _cellSub = _exploration.onNewCellExplored.listen(_onNewCellExplored);
+
+  _positionSub?.cancel();
+  _positionSub = LocationService.instance.positionStream.listen((position) {
+    if (!mounted) return;
+    final lat = position.latitude;
+    final lng = position.longitude;
+    setState(() {
+      _currentPosition = LatLng(lat, lng);
+      _outsideRegion = !isInsideRegion(lat, lng);
+      _currentPlaceName = BoundaryService.instance.placeContaining(lat, lng)?.name;
+    });
+    _recenterIfNearEdge();
+  });
+
+  setState(() => _tracking = true);
+}
 
   Future<void> _startAndroidForegroundTracking(double distanceFilter) async {
     final notificationPermission = await FlutterForegroundTask.checkNotificationPermission();
@@ -480,6 +486,8 @@ void _toggleFollowMode() {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _viewportDebounce?.cancel();
+    _cellSub?.cancel();
+    _positionSub?.cancel();
     _orientationSub?.cancel();
     WakelockPlus.disable();
     ScreenBrightness().resetScreenBrightness();
@@ -622,6 +630,11 @@ void _toggleFollowMode() {
                     });
                   }
                   await _applyScreenSaverSetting();
+                  final newFilter = await _settings.getDistanceFilterMeters();
+                  if (_tracking && newFilter != _activeDistanceFilter) {
+                    await _handleTrackingToggle(false);
+                    await _handleTrackingToggle(true);
+                  }
                 },
               ),
               ],

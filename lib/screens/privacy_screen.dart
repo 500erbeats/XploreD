@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/boundary_service.dart';
+import '../services/place_backfill.dart';
 
 class PrivacyScreen extends StatelessWidget {
   const PrivacyScreen({super.key});
@@ -133,7 +134,36 @@ Future<void> _importData(BuildContext context) async {
     type: FileType.custom,
     allowedExtensions: ['json'],
   );
-  if (picked == null) return;
+  if (picked == null || !context.mounted) return;
+
+  final status = ValueNotifier<String>('Datei wird gelesen …');
+  var dialogOpen = true;
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: ValueListenableBuilder<String>(
+          valueListenable: status,
+          builder: (_, text, __) => Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Expanded(child: Text(text)),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  void closeDialog() {
+    if (dialogOpen && context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      dialogOpen = false;
+    }
+  }
 
   try {
     final bytes = await picked.readAsBytes();
@@ -141,9 +171,15 @@ Future<void> _importData(BuildContext context) async {
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Keine gültige XploreD-Datei');
     }
+
+    status.value = 'Zellen werden importiert …';
     final result = await StorageService.instance.importAllData(decoded);
-    await _backfillPlaces();
-    if (!context.mounted) return;
+
+    await backfillPlaceIds(
+      onProgress: (done, total) => status.value = 'Orte zuordnen: $done / $total',
+    );
+
+    closeDialog();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -153,19 +189,24 @@ Future<void> _importData(BuildContext context) async {
         ),
       ),
     );
-    Navigator.pop(context, true); // Home lädt danach neu
+    Navigator.pop(context, true);
   } on FormatException catch (e) {
+    closeDialog();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Import fehlgeschlagen: ${e.message}')),
     );
   } catch (e) {
+    closeDialog();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Import fehlgeschlagen: $e')),
     );
+  } finally {
+    status.dispose();
   }
 }
+
   /// Ordnet allen Zellen ohne place_id ihren Ort zu und trägt die Orte
 /// danach als besucht ein.
 Future<void> _backfillPlaces() async {

@@ -5,6 +5,7 @@ import 'dart:async';
 import 'exploration_service.dart';
 import 'region_service.dart'; // NEU
 import '../regions/breisgau_hochschwarzwald_region.dart'; // NEU
+import 'settings_service.dart';
 
 class LocationTaskHandler extends TaskHandler {
   final _exploration = ExplorationService();
@@ -15,10 +16,11 @@ class LocationTaskHandler extends TaskHandler {
     RegionService.instance.configure(breisgauHochschwarzwaldRegion); // NEU - eigener Isolate!
     await _exploration.init();
 
-    const settings = LocationSettings(
-      accuracy: LocationAccuracy.medium,
-      distanceFilter: 50,
-    );
+  final filter = await SettingsService().getDistanceFilterMeters();
+  final settings = LocationSettings(
+    accuracy: LocationAccuracy.medium,
+    distanceFilter: filter.round(),
+  );
 
     _positionSub = Geolocator.getPositionStream(locationSettings: settings)
         .listen((position) async {

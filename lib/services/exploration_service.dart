@@ -11,6 +11,7 @@ import 'location_service.dart';
 import 'place_achievement_service.dart';
 import 'settings_service.dart';
 import 'storage_service.dart';
+import 'place_backfill.dart';
 
 class ExplorationService {
   static const int _geohashPrecision = 7;
@@ -53,23 +54,19 @@ class ExplorationService {
 /// haben. Läuft nur einmal, danach per Flag übersprungen.
 Future<void> _backfillMissingPlaceIds() async {
   final settings = SettingsService();
-  final done = await settings.isPlaceIdBackfillDone();
-  if (done) return;
+  if (await settings.isPlaceIdBackfillDone()) return;
 
-  final cells = await StorageService.instance.getCellsWithoutPlaceId();
-  debugPrint('Backfill: ${cells.length} Zellen ohne place_id gefunden');
-
-  for (final cell in cells) {
-    final place = BoundaryService.instance.placeContaining(cell.centerLat, cell.centerLng);
-    await StorageService.instance.updateCellPlaceId(cell.geohash, place?.id);
-  }
+  final n = await backfillPlaceIds();
+  debugPrint('Backfill abgeschlossen: $n Zellen verarbeitet');
 
   await settings.setPlaceIdBackfillDone(true);
-  debugPrint('Backfill abgeschlossen');
 }
 
-  void startListening() {
-    LocationService.instance.startTracking(onPosition: _handlePosition);
+  void startListening({double distanceFilterMeters = 50}) {
+    LocationService.instance.startTracking(
+      onPosition: _handlePosition,
+      distanceFilterMeters: distanceFilterMeters,
+    );
   }
 
   void stopListening() {
