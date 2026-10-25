@@ -812,6 +812,26 @@ void _toggleFollowMode() {
                 ),
               ),
             ),
+            if (_highlightRings.isNotEmpty)
+            Positioned(
+              left: 16,
+              right: 88,
+              bottom: 96,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: InputChip(
+                  backgroundColor: Colors.black.withValues(alpha: 0.75),
+                  labelStyle: const TextStyle(color: Colors.white),
+                  deleteIconColor: Colors.white,
+                  avatar: const Icon(Icons.border_outer, size: 18, color: Colors.orangeAccent),
+                  label: Text('Ortsgrenze: $_highlightPlaceName'),
+                  onDeleted: () => setState(() {
+                    _highlightRings = const [];
+                    _highlightPlaceName = null;
+                  }),
+                ),
+              ),
+            ),
             Positioned(
               right: 16,
               bottom: 32,
